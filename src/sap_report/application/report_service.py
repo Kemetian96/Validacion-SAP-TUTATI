@@ -4,6 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from sap_report.domain import cuid_a_fecha
 from sap_report.infrastructure.db import PostgresRepository, SapHanaRepository
 from sap_report.infrastructure.export import (
     exportar_comparacion,
@@ -223,25 +224,38 @@ class ReportService:
         # Busca columnas necesarias por nombre (sin sensibilidad a mayusculas).
         idx_sap_ref = _find_col_index(sap_cols, ["referencia"])
         idx_sap_doc = _find_col_index(sap_cols, ["u_bot_docentry"])
+        idx_sap_fecha = _find_col_index_optional(sap_cols, ["fecha"])
         idx_pg_id = _find_col_index(pg_cols, ["eid_orders", "eid"])
         idx_pg_uid = _find_col_index(pg_cols, ["uid_orders", "uid_rmas"])
+        idx_pg_fecha = _find_col_index_optional(pg_cols, ["fecha"])
+        idx_pg_cuid = _find_col_index_optional(pg_cols, ["cuid_documented"])
 
         sap_items = [
             {
                 "id": _norm_id(row[idx_sap_ref]),
                 "doc": str(row[idx_sap_doc]) if row[idx_sap_doc] is not None else "",
+                "fecha": str(row[idx_sap_fecha]) if idx_sap_fecha is not None and row[idx_sap_fecha] is not None else "",
             }
             for row in sap_rows
             if _norm_id(row[idx_sap_ref]) != ""
         ]
-        pg_items = [
-            {
-                "id": _norm_id(row[idx_pg_id]),
-                "uid": str(row[idx_pg_uid]) if row[idx_pg_uid] is not None else "",
-            }
-            for row in pg_rows
-            if _norm_id(row[idx_pg_id]) != ""
-        ]
+        pg_items: list[dict[str, str]] = []
+        for row in pg_rows:
+            item_id = _norm_id(row[idx_pg_id])
+            if item_id == "":
+                continue
+            fecha_pg = ""
+            if idx_pg_fecha is not None and row[idx_pg_fecha] is not None:
+                fecha_pg = str(row[idx_pg_fecha])
+            elif idx_pg_cuid is not None:
+                fecha_pg = _fecha_desde_cuid(row[idx_pg_cuid])
+            pg_items.append(
+                {
+                    "id": item_id,
+                    "uid": str(row[idx_pg_uid]) if row[idx_pg_uid] is not None else "",
+                    "fecha": fecha_pg,
+                }
+            )
 
         # Compara por identificador y por cantidad de ocurrencias.
         sap_por_id: dict[str, list[dict[str, str]]] = {}
@@ -269,6 +283,7 @@ class ReportService:
                     "tipo_faltante": "FALTA_EN_SAP",
                     "sap": "",
                     "tutati": item["uid"],
+                    "fecha": item["fecha"],
                 }
             )
         for item in faltan_en_tutati:
@@ -277,6 +292,7 @@ class ReportService:
                     "tipo_faltante": "FALTA_EN_TUTATI",
                     "sap": item["doc"],
                     "tutati": "",
+                    "fecha": item["fecha"],
                 }
             )
 
@@ -286,7 +302,7 @@ class ReportService:
             sap_cols=sap_cols,
             pg_rows=pg_rows,
             pg_cols=pg_cols,
-            threshold=0.1,
+            threshold=0.12,
         )
 
         resumen = {
@@ -479,3 +495,13 @@ def _find_col_index_optional(cols: list[str], candidates: list[str]) -> int | No
         if candidate in normalized:
             return normalized[candidate]
     return None
+
+
+def _fecha_desde_cuid(cuid_value: Any) -> str:
+    # Obtiene solo fecha DD-MM-YYYY desde CUID, si es valido.
+    if cuid_value is None:
+        return ""
+    try:
+        return cuid_a_fecha(cuid_value).strftime("%d-%m-%Y")
+    except Exception:
+        return ""

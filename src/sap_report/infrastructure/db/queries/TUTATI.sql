@@ -1,6 +1,7 @@
 -- Query PostgreSQL. Usa parametros CUID: %(fecha1)s y %(fecha2)s.
 SELECT 
     t1.eid_orders,
+    t1.cuid_documented,
     t1.total,
     t1.uid_orders
 FROM main.t_orders t1

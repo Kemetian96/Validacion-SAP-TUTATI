@@ -86,7 +86,7 @@ def exportar_comparacion(
         {"metrica": "faltan_en_sap", "cantidad": resumen.get("faltan_en_sap", 0)},
         {"metrica": "faltan_en_tutati", "cantidad": resumen.get("faltan_en_tutati", 0)},
     ]
-    faltantes_rows = faltantes if faltantes else [{"tipo_faltante": "SIN_FALTANTES", "sap": "", "tutati": ""}]
+    faltantes_rows = faltantes if faltantes else [{"tipo_faltante": "SIN_FALTANTES", "sap": "", "tutati": "", "fecha": ""}]
     diferencias_rows = diferencias if diferencias else [{
         "u_bot_docentry": "",
         "uid_orders": "",

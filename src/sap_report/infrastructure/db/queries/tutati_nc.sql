@@ -2,6 +2,7 @@
 SELECT 
     '07-' || split_part(t1.eid_rmas, '-', array_length(string_to_array(t1.eid_rmas, '-'), 1)-1) 
         || '-' || split_part(t1.eid_rmas, '-', array_length(string_to_array(t1.eid_rmas, '-'), 1)) AS EID,
+    t1.cuid_documented,
     t1.total,
     t1.uid_rmas
 FROM main.t_rmas t1
