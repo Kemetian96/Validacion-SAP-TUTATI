@@ -1,5 +1,9 @@
+import os
+import shutil
+import subprocess
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import date, datetime
 from tkinter import messagebox, ttk
 
@@ -18,6 +22,32 @@ def _parse_env_date(value: str) -> date:
         return datetime.fromisoformat(value).date()
     except ValueError:
         return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _find_browser_cmd() -> str | None:
+    # Prioriza Chrome y luego Brave en Windows.
+    candidates = [
+        shutil.which("chrome"),
+        shutil.which("chrome.exe"),
+        shutil.which("brave"),
+        shutil.which("brave.exe"),
+    ]
+    for cand in candidates:
+        if cand:
+            return cand
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    paths = [
+        os.path.join(program_files, "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(program_files_x86, "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(program_files, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+        os.path.join(program_files_x86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 def run_ui(
@@ -79,10 +109,17 @@ def run_ui(
 
     btn_row = ttk.Frame(main)
     btn_row.pack(fill="x", pady=(14, 0))
-    ejecutar_btn = ttk.Button(btn_row, text="Ejecutar reporte")
+    ejecutar_btn = ttk.Button(btn_row, text="Ejecutar reporte", width=17)
     ejecutar_btn.pack(side="left")
-    probar_btn = ttk.Button(btn_row, text="Probar conexiones")
+    probar_btn = ttk.Button(btn_row, text="Probar conexion", width=17)
     probar_btn.pack(side="left", padx=(8, 0))
+
+    btn_row_2 = ttk.Frame(main)
+    btn_row_2.pack(fill="x", pady=(8, 0))
+    validar_btn = ttk.Button(btn_row_2, text="Validar Articulos", width=17)
+    validar_btn.pack(side="left")
+    validar_igv_btn = ttk.Button(btn_row_2, text="Validar Igv", width=17)
+    validar_igv_btn.pack(side="left", padx=(8, 0))
 
     ttk.Label(main, textvariable=estado_var).pack(anchor="w", pady=(14, 0))
 
@@ -168,7 +205,55 @@ def run_ui(
 
         threading.Thread(target=worker_test, daemon=True).start()
 
+    def on_validar() -> None:
+        # Ejecuta validacion de articulos sin bloquear la UI.
+        if running["value"]:
+            return
+        running["value"] = True
+        ejecutar_btn.state(["disabled"])
+        probar_btn.state(["disabled"])
+        validar_btn.state(["disabled"])
+        set_estado("Validando articulos...")
+
+        def worker_validar() -> None:
+            try:
+                urls = service.validar_articulos(status_cb=set_estado)
+                if urls:
+                    browser_cmd = _find_browser_cmd()
+                    if browser_cmd:
+                        subprocess.Popen([browser_cmd, "--guest", "--new-window", urls[0]])
+                        for url in urls[1:]:
+                            subprocess.Popen([browser_cmd, "--guest", "--new-tab", url])
+                    else:
+                        webbrowser.open_new(urls[0])
+                        for url in urls[1:]:
+                            webbrowser.open_new_tab(url)
+                root.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Validar Articulos",
+                        f"Se abrieron {len(urls)} URLs en el navegador.",
+                    ),
+                )
+                set_estado("Validacion completada.")
+            except Exception as exc:
+                root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                set_estado(f"Error: {exc}")
+            finally:
+                running["value"] = False
+                root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                root.after(0, lambda: probar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_btn.state(["!disabled"]))
+
+        threading.Thread(target=worker_validar, daemon=True).start()
+
+    def on_validar_igv() -> None:
+        # Placeholder: valida IGV (sin logica implementada).
+        messagebox.showinfo("Validar Igv", "Funcion pendiente de implementar.")
+
     ejecutar_btn.configure(command=on_run)
     probar_btn.configure(command=on_test)
+    validar_btn.configure(command=on_validar)
+    validar_igv_btn.configure(command=on_validar_igv)
     # Inicia el loop de eventos de Tkinter.
     root.mainloop()

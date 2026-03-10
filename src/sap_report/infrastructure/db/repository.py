@@ -20,6 +20,8 @@ SAP_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "SAP.sql"
 SAP_NC_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "sap_nc.sql"
 PG_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "TUTATI.sql"
 PG_NC_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "tutati_nc.sql"
+SAP_VALIDAR_ARTICULOS_PATH = Path(__file__).resolve().parent / "queries" / "validar_articulos.sql"
+PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
 
 
 class SapHanaRepository:
@@ -31,6 +33,7 @@ class SapHanaRepository:
         # Carga plantilla SQL de SAP.
         self._query_template = SAP_QUERY_PATH.read_text(encoding="utf-8")
         self._query_nc_template = SAP_NC_QUERY_PATH.read_text(encoding="utf-8")
+        self._query_validar_articulos = SAP_VALIDAR_ARTICULOS_PATH.read_text(encoding="utf-8")
 
     def ejecutar_consulta_sql(
         self,
@@ -49,6 +52,16 @@ class SapHanaRepository:
         # Ejecuta SQL de notas de credito en SAP.
         sql = self._render_query(fecha_inicio, fecha_fin, self._query_nc_template)
         return self._ejecutar_sql(sql)
+
+    def ejecutar_validar_articulos(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+    ) -> list[str]:
+        # Ejecuta SQL de validacion de articulos y devuelve URLs.
+        sql = self._render_query(fecha_inicio, fecha_fin, self._query_validar_articulos)
+        rows, _cols = self._ejecutar_sql(sql)
+        return [str(row[0]) for row in rows if row and row[0]]
 
     def _ejecutar_sql(self, sql: str) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Reintenta la conexion ante fallos temporales.
@@ -151,6 +164,7 @@ class PostgresRepository:
         # Carga SQL parametrizado para PostgreSQL.
         self._query = PG_QUERY_PATH.read_text(encoding="utf-8")
         self._query_nc = PG_NC_QUERY_PATH.read_text(encoding="utf-8")
+        self._query_patch_etl = PG_PATCH_ETL_PATH.read_text(encoding="utf-8")
 
     def ejecutar_consulta_sql(
         self,
@@ -245,3 +259,41 @@ class PostgresRepository:
         finally:
             cur.close()
             conn.close()
+
+    def ejecutar_migrar_oc(self, fecha: date) -> None:
+        # Ejecuta migracion OC en PostgreSQL con fecha especifica.
+        sql = self._query_patch_etl.replace("{{fecha}}", fecha.strftime("%Y-%m-%d"))
+        for intento in range(1, self._settings.reintentos + 1):
+            conn = None
+            cur = None
+            try:
+                conn = psycopg2.connect(
+                    host=self._settings.pg_host,
+                    dbname=self._settings.pg_name,
+                    user=self._settings.pg_user,
+                    password=self._settings.pg_password,
+                    port=self._settings.pg_port,
+                    sslmode=self._settings.pg_sslmode,
+                    connect_timeout=self._settings.pg_connect_timeout,
+                )
+                conn.autocommit = True
+                cur = conn.cursor()
+                cur.execute(sql)
+                LOGGER.info("Migrar_OC ejecutado OK para fecha %s", fecha)
+                return
+            except psycopg2.OperationalError as exc:
+                LOGGER.warning(
+                    "Migrar_OC fallo (intento %s/%s) para fecha %s: %s",
+                    intento,
+                    self._settings.reintentos,
+                    fecha,
+                    exc,
+                )
+                if intento == self._settings.reintentos:
+                    raise
+                time.sleep(self._settings.espera_segundos)
+            finally:
+                if cur:
+                    cur.close()
+                if conn:
+                    conn.close()

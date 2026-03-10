@@ -1,4 +1,6 @@
+import calendar
 import logging
+import time
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -38,14 +40,14 @@ class ReportService:
         fecha_fin_date: date,
         status_cb=None,
     ) -> dict[str, int | str | None]:
-        # Validacion basica del rango.
+        # Validacion basica del rango (inicio no puede ser mayor al fin).
         if fecha_inicio_date > fecha_fin_date:
             raise ValueError("La fecha inicio no puede ser mayor a la fecha fin.")
 
         if status_cb:
             status_cb(f"Procesando rango: {fecha_inicio_date} -> {fecha_fin_date}")
 
-        # Acumuladores y errores por fuente.
+        # Acumuladores y errores por fuente (SAP y PostgreSQL).
         sap_rows: list[tuple[Any, ...]] = []
         sap_cols: list[str] | None = None
         sap_nc_rows: list[tuple[Any, ...]] = []
@@ -58,7 +60,7 @@ class ReportService:
         pg_error: str | None = None
 
         try:
-            # Ejecuta lotes SAP y exporta resultado.
+            # Ejecuta lotes SAP por dia y exporta el reporte base.
             sap_rows, sap_cols = self._ejecutar_por_lotes(
                 fecha_inicio_date,
                 fecha_fin_date,
@@ -67,7 +69,7 @@ class ReportService:
                 status_cb,
             )
             exportar_excel(sap_rows, sap_cols, self._sap_output_path)
-            # Agrega pestaña de acumulado NC en SAP.xlsx.
+            # Ejecuta notas de credito SAP y agrega pestaña de acumulado.
             sap_nc_rows, sap_nc_cols = self._ejecutar_por_lotes(
                 fecha_inicio_date,
                 fecha_fin_date,
@@ -88,7 +90,7 @@ class ReportService:
             LOGGER.exception("SAP fallo durante la ejecucion")
 
         try:
-            # Ejecuta lotes PostgreSQL y exporta resultado.
+            # Ejecuta lotes PostgreSQL por dia y exporta el reporte base.
             pg_rows, pg_cols = self._ejecutar_por_lotes(
                 fecha_inicio_date,
                 fecha_fin_date,
@@ -97,7 +99,7 @@ class ReportService:
                 status_cb,
             )
             exportar_excel(pg_rows, pg_cols, self._postgres_output_path)
-            # Agrega pestaña de acumulado NC en TUTATI.xlsx.
+            # Ejecuta notas de credito PostgreSQL y agrega pestaña de acumulado.
             pg_nc_rows, pg_nc_cols = self._ejecutar_por_lotes(
                 fecha_inicio_date,
                 fecha_fin_date,
@@ -123,7 +125,7 @@ class ReportService:
                 f"SAP fallo: {sap_error} | PostgreSQL fallo: {pg_error}"
             )
 
-        # Genera comparacion solo si ambas fuentes se exportaron.
+        # Genera comparacion solo si ambas fuentes se exportaron sin error.
         comparacion_error: str | None = None
         comparacion_nc_error: str | None = None
         if (not sap_error) and (not pg_error) and sap_cols and pg_cols:
@@ -180,6 +182,26 @@ class ReportService:
         except Exception as exc:
             pg = str(exc)
         return {"sap": sap, "postgres": pg}
+
+    def validar_articulos(self, status_cb=None) -> list[str]:
+        # Ejecuta patch ETL (ayer y anteayer) antes de validar articulos.
+        ayer = date.today() - timedelta(days=1)
+        anteayer = date.today() - timedelta(days=2)
+        if status_cb:
+            status_cb(f"Ejecutando patch ETL: {ayer}")
+        self._postgres_repository.ejecutar_migrar_oc(ayer)
+        time.sleep(1)
+        if status_cb:
+            status_cb(f"Ejecutando patch ETL: {anteayer}")
+        self._postgres_repository.ejecutar_migrar_oc(anteayer)
+
+        # Calcula rango: un mes antes y un mes despues de hoy.
+        hoy = date.today()
+        fecha_inicio = _add_months(hoy, -1)
+        fecha_fin = _add_months(hoy, 1)
+        if status_cb:
+            status_cb(f"Validando articulos: {fecha_inicio} -> {fecha_fin}")
+        return self._sap_repository.ejecutar_validar_articulos(fecha_inicio, fecha_fin)
 
     def _ejecutar_por_lotes(
         self,
@@ -321,6 +343,7 @@ class ReportService:
 
 
 def _find_col_index(cols: list[str], candidates: list[str]) -> int:
+    # Busca columna requerida (case-insensitive).
     normalized = {c.strip().lower(): i for i, c in enumerate(cols)}
     for candidate in candidates:
         if candidate in normalized:
@@ -329,12 +352,14 @@ def _find_col_index(cols: list[str], candidates: list[str]) -> int:
 
 
 def _norm_id(value: Any) -> str:
+    # Normaliza identificadores a texto en mayusculas.
     if value is None:
         return ""
     return str(value).strip().upper()
 
 
 def _to_float(value: Any) -> float:
+    # Convierte distintos formatos numericos a float.
     if value is None:
         return 0.0
     if isinstance(value, (int, float)):
@@ -358,6 +383,7 @@ def _calcular_diferencias_monto(
     pg_cols: list[str],
     threshold: float,
 ) -> list[dict[str, str | float]]:
+    # Indices de columnas requeridas para calcular diferencias.
     idx_sap_ref = _find_col_index(sap_cols, ["referencia"])
     idx_sap_doc = _find_col_index(sap_cols, ["u_bot_docentry"])
     idx_sap_suma = _find_col_index(sap_cols, ["suma"])
@@ -367,6 +393,7 @@ def _calcular_diferencias_monto(
     idx_pg_uid = _find_col_index(pg_cols, ["uid_orders", "uid_rmas"])
     idx_pg_total = _find_col_index(pg_cols, ["total"])
 
+    # Agrupa SAP por referencia.
     sap_map: dict[str, list[dict[str, Any]]] = {}
     for row in sap_rows:
         key = _norm_id(row[idx_sap_ref])
@@ -381,6 +408,7 @@ def _calcular_diferencias_monto(
             }
         )
 
+    # Agrupa TUTATI por EID.
     pg_map: dict[str, list[dict[str, Any]]] = {}
     for row in pg_rows:
         key = _norm_id(row[idx_pg_id])
@@ -394,6 +422,7 @@ def _calcular_diferencias_monto(
             }
         )
 
+    # Calcula diferencias solo si supera el umbral.
     diferencias: list[dict[str, str | float]] = []
     for key in sorted(set(sap_map.keys()) & set(pg_map.keys())):
         sap_list = sap_map[key]
@@ -424,6 +453,7 @@ def _acumular_sap_nc(
     idx_igv = _find_col_index(cols, ["igv"])
     idx_suma = _find_col_index(cols, ["suma"])
 
+    # Suma acumulada por referencia.
     acumulado: dict[str, dict[str, Any]] = {}
     for row in rows:
         key = _norm_id(row[idx_ref])
@@ -465,6 +495,7 @@ def _acumular_tutati_nc(
     idx_total = _find_col_index(cols, ["total"])
     idx_uid = _find_col_index(cols, ["uid_rmas", "uid_orders"])
 
+    # Suma acumulada por EID.
     acumulado: dict[str, dict[str, Any]] = {}
     for row in rows:
         key = _norm_id(row[idx_eid])
@@ -490,6 +521,7 @@ def _acumular_tutati_nc(
 
 
 def _find_col_index_optional(cols: list[str], candidates: list[str]) -> int | None:
+    # Busca columna opcional; si no existe devuelve None.
     normalized = {c.strip().lower(): i for i, c in enumerate(cols)}
     for candidate in candidates:
         if candidate in normalized:
@@ -505,3 +537,13 @@ def _fecha_desde_cuid(cuid_value: Any) -> str:
         return cuid_a_fecha(cuid_value).strftime("%d-%m-%Y")
     except Exception:
         return ""
+
+
+def _add_months(value: date, months: int) -> date:
+    # Suma o resta meses manteniendo el dia dentro del mes.
+    month = value.month - 1 + months
+    year = value.year + month // 12
+    month = month % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(value.day, last_day)
+    return date(year, month, day)
