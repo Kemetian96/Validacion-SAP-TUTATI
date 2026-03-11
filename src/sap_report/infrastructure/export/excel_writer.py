@@ -126,3 +126,41 @@ def exportar_comparacion(
 
     ws.freeze_panes = "A3"
     wb.save(ruta)
+
+
+def exportar_validar_igv(
+    rows: list[tuple[Any, ...]],
+    cols: list[str],
+    ruta: Path,
+    sheet_name: str = "Validar_IGV",
+) -> None:
+    # Exporta IGV como texto para evitar conversiones de Excel.
+    ruta = Path(ruta)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+
+    text_rows = []
+    for row in rows:
+        text_rows.append(tuple("" if v is None else str(v) for v in row))
+    df = pd.DataFrame(text_rows, columns=cols)
+
+    if ruta.exists():
+        writer = pd.ExcelWriter(
+            ruta,
+            engine="openpyxl",
+            mode="a",
+            if_sheet_exists="replace",
+        )
+    else:
+        writer = pd.ExcelWriter(
+            ruta,
+            engine="openpyxl",
+            mode="w",
+        )
+
+    with writer:
+        df.to_excel(
+            writer,
+            index=False,
+            sheet_name=sheet_name,
+            freeze_panes=(1, 0),
+        )

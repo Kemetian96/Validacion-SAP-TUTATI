@@ -1,4 +1,4 @@
-from .repository import PostgresRepository, SapHanaRepository
+from .repository import MySQLRepository, PostgresRepository, SapHanaRepository
 
 # Exporta repositorios por motor de base de datos.
-__all__ = ["SapHanaRepository", "PostgresRepository"]
+__all__ = ["SapHanaRepository", "PostgresRepository", "MySQLRepository"]

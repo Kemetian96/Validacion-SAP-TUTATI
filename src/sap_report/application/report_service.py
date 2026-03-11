@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sap_report.domain import cuid_a_fecha
-from sap_report.infrastructure.db import PostgresRepository, SapHanaRepository
+from sap_report.infrastructure.db import MySQLRepository, PostgresRepository, SapHanaRepository
 from sap_report.infrastructure.export import (
     exportar_comparacion,
     exportar_excel,
@@ -23,6 +23,7 @@ class ReportService:
         self,
         sap_repository: SapHanaRepository,
         postgres_repository: PostgresRepository,
+        mysql_repository: MySQLRepository,
         sap_output_path: Path,
         postgres_output_path: Path,
         comparacion_output_path: Path,
@@ -30,6 +31,7 @@ class ReportService:
         # Dependencias de acceso a datos y rutas de salida.
         self._sap_repository = sap_repository
         self._postgres_repository = postgres_repository
+        self._mysql_repository = mysql_repository
         self._sap_output_path = sap_output_path
         self._postgres_output_path = postgres_output_path
         self._comparacion_output_path = comparacion_output_path
@@ -202,6 +204,71 @@ class ReportService:
         if status_cb:
             status_cb(f"Validando articulos: {fecha_inicio} -> {fecha_fin}")
         return self._sap_repository.ejecutar_validar_articulos(fecha_inicio, fecha_fin)
+
+    def validar_igv(self, status_cb=None) -> dict[str, int]:
+        # Rango para IGV: maximo ultimos 3 dias (usando > inicio y < fin).
+        hoy = date.today()
+        fecha_inicio = hoy - timedelta(days=3)
+        fecha_fin = hoy + timedelta(days=1)
+        if status_cb:
+            status_cb(f"Validando IGV en SAP: {fecha_inicio} -> {fecha_fin}")
+
+        sap_rows, sap_cols = self._sap_repository.ejecutar_validar_igv(fecha_inicio, fecha_fin)
+        if not sap_cols:
+            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+
+        idx_doc = _find_col_index(sap_cols, ["u_bot_docentry"])
+        idx_inv = _find_col_index(sap_cols, ["total_inv"])
+        idx_ret = _find_col_index(sap_cols, ["total_retail"])
+
+        docentries: list[str] = []
+        for row in sap_rows:
+            total_inv = row[idx_inv]
+            total_ret = row[idx_ret]
+            if total_inv is None or total_ret is None:
+                continue
+            if str(total_inv).strip() == "" or str(total_ret).strip() == "":
+                continue
+            docentries.append(str(row[idx_doc]))
+
+        if status_cb:
+            status_cb(f"Validando IGV en MySQL: {len(docentries)} DocEntry")
+
+        doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
+        if not doc_rows:
+            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+
+        idx_doc_id = _find_col_index(doc_cols, ["id_document"])
+        document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
+
+        items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
+        if not items_cols:
+            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+
+        idx_material = _find_col_index(items_cols, ["material"])
+        items_set: set[str] = set()
+        for row in items_rows:
+            value = row[idx_material]
+            if value is None:
+                continue
+            items_set.add(str(value))
+
+        items = sorted(items_set)
+        items_igv = self._sap_repository.ejecutar_validar_igv_items(items)
+        if status_cb:
+            status_cb(f"Actualizando IGV en SAP: {len(items_igv)} items")
+
+        _guardar_log_igv(items_igv, self._comparacion_output_path.parent)
+
+        upd_comercial = self._sap_repository.ejecutar_actualizar_igv_comercial(items_igv)
+        upd_pedral = self._sap_repository.ejecutar_actualizar_igv_pedral(items_igv)
+
+        return {
+            "items_total": len(items),
+            "items_igv": len(items_igv),
+            "upd_comercial": upd_comercial,
+            "upd_pedral": upd_pedral,
+        }
 
     def _ejecutar_por_lotes(
         self,
@@ -547,3 +614,14 @@ def _add_months(value: date, months: int) -> date:
     last_day = calendar.monthrange(year, month)[1]
     day = min(value.day, last_day)
     return date(year, month, day)
+
+
+def _guardar_log_igv(items: list[str], output_dir: Path) -> None:
+    # Guarda en TXT los ItemCode actualizados.
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fecha = date.today().strftime("%Y%m%d")
+    ruta = output_dir / f"validar_igv_actualizados_{fecha}.txt"
+    with ruta.open("w", encoding="utf-8") as file:
+        file.write("ItemCode\n")
+        for item in items:
+            file.write(f"{item}\n")

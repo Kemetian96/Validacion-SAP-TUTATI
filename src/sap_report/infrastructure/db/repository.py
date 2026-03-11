@@ -6,6 +6,10 @@ from typing import Any
 
 import psycopg2
 try:
+    import pymysql
+except ImportError:
+    pymysql = None
+try:
     from hdbcli import dbapi
 except ImportError:
     dbapi = None
@@ -21,7 +25,13 @@ SAP_NC_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "sap_nc.sql"
 PG_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "TUTATI.sql"
 PG_NC_QUERY_PATH = Path(__file__).resolve().parent / "queries" / "tutati_nc.sql"
 SAP_VALIDAR_ARTICULOS_PATH = Path(__file__).resolve().parent / "queries" / "validar_articulos.sql"
+SAP_VALIDAR_IGV_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_sap.sql"
+SAP_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_sap_items.sql"
+SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_comercial.sql"
+SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_pedral.sql"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
+MYSQL_VALIDAR_IGV_DOCS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_docs.sql"
+MYSQL_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_items.sql"
 
 
 class SapHanaRepository:
@@ -34,6 +44,10 @@ class SapHanaRepository:
         self._query_template = SAP_QUERY_PATH.read_text(encoding="utf-8")
         self._query_nc_template = SAP_NC_QUERY_PATH.read_text(encoding="utf-8")
         self._query_validar_articulos = SAP_VALIDAR_ARTICULOS_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv = SAP_VALIDAR_IGV_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_items = SAP_VALIDAR_IGV_ITEMS_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_update_comercial = SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_update_pedral = SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH.read_text(encoding="utf-8")
 
     def ejecutar_consulta_sql(
         self,
@@ -62,6 +76,40 @@ class SapHanaRepository:
         sql = self._render_query(fecha_inicio, fecha_fin, self._query_validar_articulos)
         rows, _cols = self._ejecutar_sql(sql)
         return [str(row[0]) for row in rows if row and row[0]]
+
+    def ejecutar_validar_igv(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta SQL de validacion IGV en SAP.
+        sql = self._render_query(fecha_inicio, fecha_fin, self._query_validar_igv)
+        return self._ejecutar_sql(sql)
+
+    def ejecutar_validar_igv_items(self, items: list[str]) -> list[str]:
+        # Consulta Items con TaxCodeAR = IGV en SAP.
+        if not items:
+            return []
+        items_in = _render_in_list(items)
+        sql = self._query_validar_igv_items.replace("{{items_in}}", items_in)
+        rows, _cols = self._ejecutar_sql(sql)
+        return [str(r[0]) for r in rows if r and r[0]]
+
+    def ejecutar_actualizar_igv_comercial(self, items: list[str]) -> int:
+        # Actualiza TaxCodeAP en B1H_COMERCIALMONT_PROD.
+        if not items:
+            return 0
+        items_in = _render_in_list(items)
+        sql = self._query_validar_igv_update_comercial.replace("{{items_in}}", items_in)
+        return self._ejecutar_sql_modificacion(sql)
+
+    def ejecutar_actualizar_igv_pedral(self, items: list[str]) -> int:
+        # Actualiza TaxCodeAP en B1H_PEDRAL_PROD.
+        if not items:
+            return 0
+        items_in = _render_in_list(items)
+        sql = self._query_validar_igv_update_pedral.replace("{{items_in}}", items_in)
+        return self._ejecutar_sql_modificacion(sql)
 
     def _ejecutar_sql(self, sql: str) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Reintenta la conexion ante fallos temporales.
@@ -119,6 +167,51 @@ class SapHanaRepository:
                     conn.close()
 
         raise RuntimeError("No se pudo ejecutar la consulta SAP tras todos los reintentos.")
+
+    def _ejecutar_sql_modificacion(self, sql: str) -> int:
+        # Ejecuta SQL de actualizacion en SAP y devuelve filas afectadas.
+        for intento in range(1, self._settings.reintentos + 1):
+            conn = None
+            cur = None
+            try:
+                conn_kwargs = {
+                    "address": self._settings.sap_hana_host,
+                    "port": self._settings.sap_hana_port,
+                    "user": self._settings.sap_hana_user,
+                    "password": self._settings.sap_hana_password,
+                }
+                if self._settings.sap_hana_encrypt is not None:
+                    conn_kwargs["encrypt"] = self._settings.sap_hana_encrypt
+                if self._settings.sap_hana_ssl_validate_certificate is not None:
+                    conn_kwargs["sslValidateCertificate"] = self._settings.sap_hana_ssl_validate_certificate
+                if self._settings.sap_hana_connect_timeout is not None:
+                    conn_kwargs["connecttimeout"] = self._settings.sap_hana_connect_timeout
+                if self._settings.sap_hana_ssl_trust_store:
+                    conn_kwargs["sslTrustStore"] = self._settings.sap_hana_ssl_trust_store
+                if self._settings.sap_hana_ssl_key_store_password:
+                    conn_kwargs["sslKeyStorePassword"] = self._settings.sap_hana_ssl_key_store_password
+
+                conn = dbapi.connect(**conn_kwargs)
+                cur = conn.cursor()
+                cur.execute(sql)
+                return cur.rowcount if cur.rowcount is not None else 0
+            except dbapi.Error as exc:
+                LOGGER.warning(
+                    "Operacion SAP caida (intento %s/%s): %s",
+                    intento,
+                    self._settings.reintentos,
+                    exc,
+                )
+                if intento == self._settings.reintentos:
+                    raise
+                time.sleep(self._settings.espera_segundos)
+            finally:
+                if cur:
+                    cur.close()
+                if conn:
+                    conn.close()
+
+        raise RuntimeError("No se pudo ejecutar la operacion SAP tras todos los reintentos.")
 
     def probar_conexion(self) -> None:
         # Conexion corta para validar credenciales/red sin ejecutar reporte.
@@ -297,3 +390,117 @@ class PostgresRepository:
                     cur.close()
                 if conn:
                     conn.close()
+
+
+class MySQLRepository:
+    def __init__(self, settings: Settings) -> None:
+        # Valida dependencia de MySQL.
+        if pymysql is None:
+            raise RuntimeError("Falta dependencia pymysql. Instala con: pip install pymysql")
+        # Valida que las credenciales obligatorias esten presentes.
+        if not settings.mysql_host:
+            raise ValueError("Falta MYSQL_HOST en .env")
+        if not settings.mysql_name:
+            raise ValueError("Falta MYSQL_NAME en .env")
+        if not settings.mysql_user:
+            raise ValueError("Falta MYSQL_USER en .env")
+        if not settings.mysql_password:
+            raise ValueError("Falta MYSQL_PASSWORD en .env")
+        self._settings = settings
+        self._mysql_host = settings.mysql_host
+        self._mysql_name = settings.mysql_name
+        self._mysql_user = settings.mysql_user
+        self._mysql_password = settings.mysql_password
+        self._mysql_port = settings.mysql_port or 3306
+        self._mysql_connect_timeout = settings.mysql_connect_timeout or 10
+        self._query_validar_igv_docs = MYSQL_VALIDAR_IGV_DOCS_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_items = MYSQL_VALIDAR_IGV_ITEMS_PATH.read_text(encoding="utf-8")
+
+    def probar_conexion(self) -> None:
+        # Conexion corta para validar acceso a MySQL.
+        conn = pymysql.connect(
+            host=self._mysql_host,
+            user=self._mysql_user,
+            password=self._mysql_password,
+            database=self._mysql_name,
+            port=self._mysql_port,
+            connect_timeout=self._mysql_connect_timeout,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        finally:
+            conn.close()
+
+    def ejecutar_sql(
+        self,
+        query: str,
+        params: tuple[Any, ...] | None = None,
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta SQL en MySQL con reintentos.
+        for intento in range(1, self._settings.reintentos + 1):
+            conn = None
+            try:
+                conn = pymysql.connect(
+                    host=self._mysql_host,
+                    user=self._mysql_user,
+                    password=self._mysql_password,
+                    database=self._mysql_name,
+                    port=self._mysql_port,
+                    connect_timeout=self._mysql_connect_timeout,
+                )
+                with conn.cursor() as cur:
+                    if params is None:
+                        cur.execute(query)
+                    else:
+                        cur.execute(query, params)
+                    rows = cur.fetchall()
+                    cols = [desc[0] for desc in cur.description] if cur.description else []
+                    return list(rows), cols
+            except pymysql.MySQLError as exc:
+                LOGGER.warning(
+                    "Conexion MySQL caida (intento %s/%s): %s",
+                    intento,
+                    self._settings.reintentos,
+                    exc,
+                )
+                if intento == self._settings.reintentos:
+                    raise
+                time.sleep(self._settings.espera_segundos)
+            finally:
+                if conn:
+                    conn.close()
+
+        raise RuntimeError("No se pudo ejecutar la consulta MySQL tras todos los reintentos.")
+
+    def ejecutar_validar_igv_docs(
+        self,
+        docentries: list[str],
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta query de documentos en MySQL.
+        if not docentries:
+            return [], ["id_document", "DocEntry"]
+        doc_in = _render_in_list(docentries)
+        sql = self._query_validar_igv_docs.replace("{{docentries_in}}", doc_in)
+        return self.ejecutar_sql(sql)
+
+    def ejecutar_validar_igv_items(
+        self,
+        document_ids: list[str],
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta query de items en MySQL.
+        if not document_ids:
+            return [], []
+        doc_in = _render_in_list(document_ids)
+        sql = self._query_validar_igv_items.replace("{{documents_in}}", doc_in)
+        return self.ejecutar_sql(sql)
+
+
+def _render_in_list(values: list[str]) -> str:
+    # Renderiza lista para IN ('a','b','c') con escape basico.
+    safe = []
+    for value in values:
+        raw = str(value).replace("'", "''")
+        safe.append(f"'{raw}'")
+    return ", ".join(safe)

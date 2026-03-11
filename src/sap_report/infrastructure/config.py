@@ -48,6 +48,14 @@ def _get_optional_int(name: str) -> Optional[int]:
     return int(raw.strip())
 
 
+def _get_optional_env(name: str) -> Optional[str]:
+    # Lee string opcional.
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return raw.strip()
+
+
 @dataclass(frozen=True)
 class Settings:
     # PostgreSQL
@@ -68,6 +76,13 @@ class Settings:
     sap_hana_ssl_trust_store: Optional[str]
     sap_hana_ssl_key_store_password: Optional[str]
     sap_hana_connect_timeout: Optional[int]
+    # MySQL (opcional)
+    mysql_host: Optional[str]
+    mysql_name: Optional[str]
+    mysql_user: Optional[str]
+    mysql_password: Optional[str]
+    mysql_port: Optional[int]
+    mysql_connect_timeout: Optional[int]
     # Salidas
     sap_output_path: Path
     pg_output_path: Path
@@ -103,6 +118,12 @@ def load_settings() -> Settings:
         sap_hana_ssl_trust_store=os.getenv("SAP_HANA_SSL_TRUST_STORE"),
         sap_hana_ssl_key_store_password=os.getenv("SAP_HANA_SSL_KEY_STORE_PASSWORD"),
         sap_hana_connect_timeout=_get_optional_int("SAP_HANA_CONNECT_TIMEOUT"),
+        mysql_host=_get_optional_env("MYSQL_HOST"),
+        mysql_name=_get_optional_env("MYSQL_NAME"),
+        mysql_user=_get_optional_env("MYSQL_USER"),
+        mysql_password=_get_optional_env("MYSQL_PASSWORD"),
+        mysql_port=_get_optional_int("MYSQL_PORT"),
+        mysql_connect_timeout=_get_optional_int("MYSQL_CONNECT_TIMEOUT"),
         sap_output_path=Path(_get_env("SAP_OUTPUT_PATH", str(Path("OUTPUT") / "SAP.xlsx"))),
         pg_output_path=Path(_get_env("PG_OUTPUT_PATH", str(Path("OUTPUT") / "TUTATI.xlsx"))),
         comparacion_output_path=Path(_get_env("COMPARACION_OUTPUT_PATH", str(Path("OUTPUT") / "COMPARACION.xlsx"))),

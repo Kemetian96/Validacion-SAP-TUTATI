@@ -248,8 +248,44 @@ def run_ui(
         threading.Thread(target=worker_validar, daemon=True).start()
 
     def on_validar_igv() -> None:
-        # Placeholder: valida IGV (sin logica implementada).
-        messagebox.showinfo("Validar Igv", "Funcion pendiente de implementar.")
+        # Ejecuta validacion IGV sin bloquear la UI.
+        if running["value"]:
+            return
+        running["value"] = True
+        ejecutar_btn.state(["disabled"])
+        probar_btn.state(["disabled"])
+        validar_btn.state(["disabled"])
+        validar_igv_btn.state(["disabled"])
+        set_estado("Validando IGV...")
+
+        def worker_igv() -> None:
+            try:
+                resumen = service.validar_igv(status_cb=set_estado)
+                root.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Validar Igv",
+                        "Items total: {items_total}\nItems IGV: {items_igv}\n"
+                        "Actualizados Comercial: {upd_comercial}\nActualizados Pedral: {upd_pedral}".format(
+                            items_total=resumen["items_total"],
+                            items_igv=resumen["items_igv"],
+                            upd_comercial=resumen["upd_comercial"],
+                            upd_pedral=resumen["upd_pedral"],
+                        ),
+                    ),
+                )
+                set_estado("Validacion IGV completada.")
+            except Exception as exc:
+                root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                set_estado(f"Error: {exc}")
+            finally:
+                running["value"] = False
+                root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                root.after(0, lambda: probar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+
+        threading.Thread(target=worker_igv, daemon=True).start()
 
     ejecutar_btn.configure(command=on_run)
     probar_btn.configure(command=on_test)
