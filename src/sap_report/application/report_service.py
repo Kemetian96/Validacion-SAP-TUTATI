@@ -175,6 +175,7 @@ class ReportService:
         # Test rapido de conectividad sin correr consultas pesadas.
         sap = "OK"
         pg = "OK"
+        mysql = "OK"
         try:
             self._sap_repository.probar_conexion()
         except Exception as exc:
@@ -183,7 +184,11 @@ class ReportService:
             self._postgres_repository.probar_conexion()
         except Exception as exc:
             pg = str(exc)
-        return {"sap": sap, "postgres": pg}
+        try:
+            self._mysql_repository.probar_conexion()
+        except Exception as exc:
+            mysql = str(exc)
+        return {"sap": sap, "postgres": pg, "mysql": mysql}
 
     def validar_articulos(self, status_cb=None) -> list[str]:
         # Ejecuta patch ETL (ayer y anteayer) antes de validar articulos.

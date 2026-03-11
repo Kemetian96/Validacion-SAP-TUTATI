@@ -191,7 +191,11 @@ def run_ui(
                     0,
                     lambda: messagebox.showinfo(
                         "Resultado conexiones",
-                        f"SAP: {result['sap']}\nPostgreSQL: {result['postgres']}",
+                        "SAP: {sap}\nPostgreSQL: {pg}\nMySQL: {mysql}".format(
+                            sap=result["sap"],
+                            pg=result["postgres"],
+                            mysql=result["mysql"],
+                        ),
                     ),
                 )
                 set_estado("Prueba de conexiones completada.")
