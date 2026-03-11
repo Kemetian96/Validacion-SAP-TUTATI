@@ -270,11 +270,14 @@ def run_ui(
                     lambda: messagebox.showinfo(
                         "Validar Igv",
                         "Items total: {items_total}\nItems IGV: {items_igv}\n"
-                        "Actualizados Comercial: {upd_comercial}\nActualizados Pedral: {upd_pedral}".format(
+                        "Actualizados Comercial: {upd_comercial}\nActualizados Pedral: {upd_pedral}\n"
+                        "SP ORDER ejecutados: {sp_orders}\nSP RMA ejecutados: {sp_rmas}".format(
                             items_total=resumen["items_total"],
                             items_igv=resumen["items_igv"],
                             upd_comercial=resumen["upd_comercial"],
                             upd_pedral=resumen["upd_pedral"],
+                            sp_orders=resumen["sp_orders"],
+                            sp_rmas=resumen["sp_rmas"],
                         ),
                     ),
                 )

@@ -1,12 +1,12 @@
 import calendar
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from sap_report.domain import cuid_a_fecha
+from sap_report.domain import cuid_a_fecha, fecha_a_cuid
 from sap_report.infrastructure.db import MySQLRepository, PostgresRepository, SapHanaRepository
 from sap_report.infrastructure.export import (
     exportar_comparacion,
@@ -268,11 +268,30 @@ class ReportService:
         upd_comercial = self._sap_repository.ejecutar_actualizar_igv_comercial(items_igv)
         upd_pedral = self._sap_repository.ejecutar_actualizar_igv_pedral(items_igv)
 
+        # Ejecuta creacion de movimientos en MySQL para ultimos 3 dias.
+        cuid_inicio = fecha_a_cuid(datetime.combine(hoy - timedelta(days=3), datetime.min.time()))
+        cuid_fin = fecha_a_cuid(datetime.combine(hoy, datetime.min.time()))
+        if status_cb:
+            status_cb("Buscando UID_ORDERS pendientes...")
+        uid_orders = self._mysql_repository.obtener_uid_orders_pendientes(cuid_inicio, cuid_fin)
+        if status_cb:
+            status_cb(f"Ejecutando SP ORDER: {len(uid_orders)}")
+        ok_orders = self._mysql_repository.ejecutar_sp_create_document_movement(uid_orders, "ORDER")
+
+        if status_cb:
+            status_cb("Buscando UID_RMAS pendientes...")
+        uid_rmas = self._mysql_repository.obtener_uid_rmas_pendientes(cuid_inicio, cuid_fin)
+        if status_cb:
+            status_cb(f"Ejecutando SP RMA: {len(uid_rmas)}")
+        ok_rmas = self._mysql_repository.ejecutar_sp_create_document_movement(uid_rmas, "RMA")
+
         return {
             "items_total": len(items),
             "items_igv": len(items_igv),
             "upd_comercial": upd_comercial,
             "upd_pedral": upd_pedral,
+            "sp_orders": ok_orders,
+            "sp_rmas": ok_rmas,
         }
 
     def _ejecutar_por_lotes(

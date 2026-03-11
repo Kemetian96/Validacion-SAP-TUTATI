@@ -32,6 +32,8 @@ SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH = Path(__file__).resolve().parent / "queries"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
 MYSQL_VALIDAR_IGV_DOCS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_docs.sql"
 MYSQL_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_items.sql"
+MYSQL_VALIDAR_IGV_PEND_ORDERS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_pendientes_orders.sql"
+MYSQL_VALIDAR_IGV_PEND_RMAS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_pendientes_rmas.sql"
 
 
 class SapHanaRepository:
@@ -415,6 +417,8 @@ class MySQLRepository:
         self._mysql_connect_timeout = settings.mysql_connect_timeout or 10
         self._query_validar_igv_docs = MYSQL_VALIDAR_IGV_DOCS_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_items = MYSQL_VALIDAR_IGV_ITEMS_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_pend_orders = MYSQL_VALIDAR_IGV_PEND_ORDERS_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_pend_rmas = MYSQL_VALIDAR_IGV_PEND_RMAS_PATH.read_text(encoding="utf-8")
 
     def probar_conexion(self) -> None:
         # Conexion corta para validar acceso a MySQL.
@@ -495,6 +499,65 @@ class MySQLRepository:
         doc_in = _render_in_list(document_ids)
         sql = self._query_validar_igv_items.replace("{{documents_in}}", doc_in)
         return self.ejecutar_sql(sql)
+
+    def obtener_uid_orders_pendientes(self, cuid_inicio: int, cuid_fin: int) -> list[str]:
+        # Obtiene UID_ORDERS pendientes para crear movimiento.
+        sql = (
+            self._query_validar_igv_pend_orders
+            .replace("{{cuid_inicio}}", str(cuid_inicio))
+            .replace("{{cuid_fin}}", str(cuid_fin))
+        )
+        rows, _cols = self.ejecutar_sql(sql)
+        return [str(r[0]) for r in rows if r and r[0]]
+
+    def obtener_uid_rmas_pendientes(self, cuid_inicio: int, cuid_fin: int) -> list[str]:
+        # Obtiene UID_RMAS pendientes para crear movimiento.
+        sql = (
+            self._query_validar_igv_pend_rmas
+            .replace("{{cuid_inicio}}", str(cuid_inicio))
+            .replace("{{cuid_fin}}", str(cuid_fin))
+        )
+        rows, _cols = self.ejecutar_sql(sql)
+        return [str(r[0]) for r in rows if r and r[0]]
+
+    def ejecutar_sp_create_document_movement(self, uids: list[str], tipo: str) -> int:
+        # Ejecuta el SP de movimiento para cada UID.
+        if not uids:
+            return 0
+        total_ok = 0
+        for intento in range(1, self._settings.reintentos + 1):
+            conn = None
+            try:
+                conn = pymysql.connect(
+                    host=self._mysql_host,
+                    user=self._mysql_user,
+                    password=self._mysql_password,
+                    database=self._mysql_name,
+                    port=self._mysql_port,
+                    connect_timeout=self._mysql_connect_timeout,
+                )
+                with conn.cursor() as cur:
+                    for uid in uids:
+                        cur.execute("CALL main.sp_create_document_movement(%s, %s)", (uid, tipo))
+                        total_ok += 1
+                return total_ok
+            except pymysql.MySQLError as exc:
+                LOGGER.warning(
+                    "SP create_document_movement fallo (intento %s/%s) tipo %s: %s",
+                    intento,
+                    self._settings.reintentos,
+                    tipo,
+                    exc,
+                )
+                total_ok = 0
+                if intento == self._settings.reintentos:
+                    raise
+                time.sleep(self._settings.espera_segundos)
+            finally:
+                if conn:
+                    conn.close()
+
+        return total_ok
 
 
 def _render_in_list(values: list[str]) -> str:
