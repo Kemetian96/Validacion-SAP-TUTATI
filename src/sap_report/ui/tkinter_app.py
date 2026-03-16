@@ -152,18 +152,18 @@ def run_ui(
     actions.grid_columnconfigure(0, weight=1)
     actions.grid_columnconfigure(1, weight=1)
 
-    ejecutar_btn = ttk.Button(actions, text="Ejecutar reporte", width=17, style="Accent.TButton")
-    ejecutar_btn.grid(row=0, column=0, sticky="w")
     validar_btn = ttk.Button(actions, text="Validar Articulos", width=17, style="Secondary.TButton")
-    validar_btn.grid(row=0, column=1, sticky="w", padx=(8, 0))
-
+    validar_btn.grid(row=0, column=0, sticky="w")
     validar_igv_btn = ttk.Button(actions, text="Validar Igv", width=17, style="Secondary.TButton")
-    validar_igv_btn.grid(row=1, column=0, sticky="w", pady=(8, 0))
-    revisar_hilos_btn = ttk.Button(actions, text="Revisar Hilos", width=17, style="Secondary.TButton")
-    revisar_hilos_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    validar_igv_btn.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
+    revisar_hilos_btn = ttk.Button(actions, text="Revisar Hilos", width=17, style="Secondary.TButton")
+    revisar_hilos_btn.grid(row=1, column=0, sticky="w", pady=(8, 0))
     prestamo_btn = ttk.Button(actions, text="Prestamo", width=17, style="Secondary.TButton")
-    prestamo_btn.grid(row=2, column=0, sticky="w", pady=(8, 0))
+    prestamo_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+
+    ejecutar_btn = ttk.Button(actions, text="Ejecutar reporte", width=17, style="Accent.TButton")
+    ejecutar_btn.grid(row=2, column=0, columnspan=2, pady=(10, 0))
 
     ttk.Label(main, textvariable=estado_var, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
 
@@ -172,6 +172,14 @@ def run_ui(
     def set_estado(msg: str) -> None:
         # Actualiza etiqueta de estado desde cualquier hilo.
         root.after(0, lambda: estado_var.set(msg))
+
+    def _centrar_ventana(window: tk.Toplevel, width: int, height: int) -> None:
+        # Centra una ventana en la pantalla con tamaño fijo.
+        screen_w = window.winfo_screenwidth()
+        screen_h = window.winfo_screenheight()
+        x = max(0, int((screen_w - width) / 2))
+        y = max(0, int((screen_h - height) / 2))
+        window.geometry(f"{width}x{height}+{x}+{y}")
 
     def on_run() -> None:
         # Evita ejecuciones simultaneas.
@@ -323,16 +331,21 @@ def run_ui(
                         "Validar Igv",
                         "Items total: {items_total}\nItems IGV: {items_igv}\n"
                         "Actualizados Comercial: {upd_comercial}\nActualizados Pedral: {upd_pedral}\n"
+                        "Hilos actualizados: {upd_hilos}\n"
                         "SP ORDER ejecutados: {sp_orders}\nSP RMA ejecutados: {sp_rmas}".format(
                             items_total=resumen["items_total"],
                             items_igv=resumen["items_igv"],
                             upd_comercial=resumen["upd_comercial"],
                             upd_pedral=resumen["upd_pedral"],
+                            upd_hilos=resumen["upd_hilos"],
                             sp_orders=resumen["sp_orders"],
                             sp_rmas=resumen["sp_rmas"],
                         ),
                     ),
                 )
+                docentries = resumen.get("docentries", [])
+                if docentries:
+                    root.after(0, lambda: _mostrar_docentries(docentries))
                 set_estado("Validacion IGV completada.")
             except Exception as exc:
                 root.after(0, lambda: messagebox.showerror("Error", str(exc)))
@@ -382,7 +395,7 @@ def run_ui(
         # Muestra resultados de prestamo en tabla.
         window = tk.Toplevel(root)
         window.title("Prestamo")
-        window.geometry("660x360")
+        _centrar_ventana(window, 860, 460)
         window.configure(bg=bg)
 
         table_frame = ttk.Frame(window)
@@ -406,6 +419,86 @@ def run_ui(
 
         for row in rows:
             tree.insert("", "end", values=row)
+
+        def _copiar_filas(filas: list[tuple[Any, ...]]) -> None:
+            if not filas:
+                return
+            header = "\t".join(cols)
+            body = "\n".join("\t".join(str(v) for v in fila) for fila in filas)
+            texto = header + "\n" + body
+            window.clipboard_clear()
+            window.clipboard_append(texto)
+            window.update()
+
+        def _copiar_seleccion() -> None:
+            seleccion = tree.selection()
+            filas = [tree.item(item_id, "values") for item_id in seleccion]
+            _copiar_filas(filas)
+
+        def _copiar_todo() -> None:
+            filas = [tree.item(item_id, "values") for item_id in tree.get_children("")]
+            _copiar_filas(filas)
+
+        botones = ttk.Frame(window)
+        botones.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(botones, text="Copiar seleccion", style="Secondary.TButton", command=_copiar_seleccion).pack(
+            side="left"
+        )
+        ttk.Button(botones, text="Copiar todo", style="Secondary.TButton", command=_copiar_todo).pack(
+            side="left", padx=(8, 0)
+        )
+
+    def _mostrar_docentries(docentries: list[str]) -> None:
+        # Muestra lista de U_BOT_DOCENTRY con opcion de copiar.
+        window = tk.Toplevel(root)
+        window.title(f"U_BOT_DOCENTRY evaluados ({len(docentries)})")
+        _centrar_ventana(window, 420, 460)
+        window.configure(bg=bg)
+
+        frame = ttk.Frame(window)
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        columns = ("docentry",)
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=14)
+        tree.heading("docentry", text="U_BOT_DOCENTRY")
+        tree.column("docentry", width=240, anchor="center")
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        for value in docentries:
+            tree.insert("", "end", values=(value,))
+
+        def _copiar_filas(filas: list[tuple[Any, ...]]) -> None:
+            if not filas:
+                return
+            body = "\n".join(str(fila[0]) for fila in filas)
+            window.clipboard_clear()
+            window.clipboard_append(body)
+            window.update()
+
+        def _copiar_seleccion() -> None:
+            seleccion = tree.selection()
+            filas = [tree.item(item_id, "values") for item_id in seleccion]
+            _copiar_filas(filas)
+
+        def _copiar_todo_doc() -> None:
+            filas = [tree.item(item_id, "values") for item_id in tree.get_children("")]
+            _copiar_filas(filas)
+
+        botones = ttk.Frame(window)
+        botones.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(botones, text="Copiar seleccion", style="Secondary.TButton", command=_copiar_seleccion).pack(
+            side="left"
+        )
+        ttk.Button(botones, text="Copiar todo", style="Secondary.TButton", command=_copiar_todo_doc).pack(
+            side="left", padx=(8, 0)
+        )
 
     def on_revisar_hilos() -> None:
         # Ejecuta revision de hilos sin bloquear la UI.

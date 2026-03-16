@@ -220,7 +220,16 @@ class ReportService:
 
         sap_rows, sap_cols = self._sap_repository.ejecutar_validar_igv(fecha_inicio, fecha_fin)
         if not sap_cols:
-            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+            return {
+                "items_total": 0,
+                "items_igv": 0,
+                "upd_comercial": 0,
+                "upd_pedral": 0,
+                "upd_hilos": 0,
+                "sp_orders": 0,
+                "sp_rmas": 0,
+                "docentries": [],
+            }
 
         idx_doc = _find_col_index(sap_cols, ["u_bot_docentry"])
         idx_inv = _find_col_index(sap_cols, ["total_inv"])
@@ -235,20 +244,38 @@ class ReportService:
             if str(total_inv).strip() == "" or str(total_ret).strip() == "":
                 continue
             docentries.append(str(row[idx_doc]))
-
+        docentries_out = list(dict.fromkeys(docentries))
         if status_cb:
-            status_cb(f"Validando IGV en MySQL: {len(docentries)} DocEntry")
+            status_cb(f"Validando IGV en MySQL: {len(docentries_out)} DocEntry")
 
         doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
         if not doc_rows:
-            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+            return {
+                "items_total": 0,
+                "items_igv": 0,
+                "upd_comercial": 0,
+                "upd_pedral": 0,
+                "upd_hilos": upd_hilos,
+                "sp_orders": 0,
+                "sp_rmas": 0,
+                "docentries": docentries_out,
+            }
 
         idx_doc_id = _find_col_index(doc_cols, ["id_document"])
         document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
 
         items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
         if not items_cols:
-            return {"items_total": 0, "items_igv": 0, "upd_comercial": 0, "upd_pedral": 0}
+            return {
+                "items_total": 0,
+                "items_igv": 0,
+                "upd_comercial": 0,
+                "upd_pedral": 0,
+                "upd_hilos": upd_hilos,
+                "sp_orders": 0,
+                "sp_rmas": 0,
+                "docentries": docentries_out,
+            }
 
         idx_material = _find_col_index(items_cols, ["material"])
         items_set: set[str] = set()
@@ -262,8 +289,6 @@ class ReportService:
         items_igv = self._sap_repository.ejecutar_validar_igv_items(items)
         if status_cb:
             status_cb(f"Actualizando IGV en SAP: {len(items_igv)} items")
-
-        _guardar_log_igv(items_igv, self._comparacion_output_path.parent)
 
         upd_comercial = self._sap_repository.ejecutar_actualizar_igv_comercial(items_igv)
         upd_pedral = self._sap_repository.ejecutar_actualizar_igv_pedral(items_igv)
@@ -285,13 +310,21 @@ class ReportService:
             status_cb(f"Ejecutando SP RMA: {len(uid_rmas)}")
         ok_rmas = self._mysql_repository.ejecutar_sp_create_document_movement(uid_rmas, "RMA")
 
+        upd_hilos = 0
+        if docentries_out:
+            if status_cb:
+                status_cb(f"Actualizando Hilos en SAP: {len(docentries_out)} DocEntry")
+            upd_hilos = self._sap_repository.ejecutar_actualizar_igv_hilos(docentries_out)
+
         return {
             "items_total": len(items),
             "items_igv": len(items_igv),
             "upd_comercial": upd_comercial,
             "upd_pedral": upd_pedral,
+            "upd_hilos": upd_hilos,
             "sp_orders": ok_orders,
             "sp_rmas": ok_rmas,
+            "docentries": docentries_out,
         }
 
     def consultar_prestamo(
@@ -300,7 +333,16 @@ class ReportService:
         status_cb=None,
     ) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Flujo Prestamo: DocEntry -> documentos -> items -> stock SAP.
-        columnas = ["Material", "Centro", "Stock_SAP", "Cantidad_MYSQL", "Diferencia"]
+        columnas = [
+            "UID_ORDERS",
+            "Material",
+            "Centro",
+            "Consignado",
+            "B2B",
+            "Stock_SAP",
+            "Cantidad_MYSQL",
+            "Diferencia",
+        ]
         if not docentries:
             return [], columnas
 
@@ -321,21 +363,27 @@ class ReportService:
         if not items_rows:
             return [], columnas
 
+        idx_uid = _find_col_index_optional(items_cols, ["uid_orders"])
         idx_material = _find_col_index(items_cols, ["material"])
         idx_centro = _find_col_index(items_cols, ["centro"])
         idx_matcentro = _find_col_index(items_cols, ["material_centro"])
         idx_cantidad = _find_col_index(items_cols, ["cantidad"])
+        idx_consignado = _find_col_index_optional(items_cols, ["consignado"])
+        idx_b2b = _find_col_index_optional(items_cols, ["b2b"])
 
-        memoria: list[tuple[str, str, str, Any]] = []
+        memoria: list[tuple[str, str, str, str, Any, Any, Any]] = []
         materiales: set[str] = set()
         centros: set[str] = set()
 
         for row in items_rows:
+            uid = str(row[idx_uid]) if idx_uid is not None and row[idx_uid] is not None else ""
             material = str(row[idx_material]) if row[idx_material] is not None else ""
             centro = str(row[idx_centro]) if row[idx_centro] is not None else ""
             matcentro = str(row[idx_matcentro]) if row[idx_matcentro] is not None else material + centro
             cantidad = row[idx_cantidad]
-            memoria.append((material, centro, matcentro, cantidad))
+            consignado = row[idx_consignado] if idx_consignado is not None else ""
+            b2b = row[idx_b2b] if idx_b2b is not None else ""
+            memoria.append((uid, material, centro, matcentro, cantidad, consignado, b2b))
             if material:
                 materiales.add(material)
             if centro:
@@ -365,11 +413,13 @@ class ReportService:
             sap_map[key] = _to_float(row[idx_stock])
 
         resultados: list[tuple[Any, ...]] = []
-        for material, centro, matcentro, cantidad in memoria:
+        for uid, material, centro, matcentro, cantidad, consignado, b2b in memoria:
             stock = sap_map.get(matcentro, 0.0)
             cantidad_num = _to_float(cantidad)
             diff = cantidad_num - stock
-            resultados.append((material, centro, stock, cantidad_num, diff))
+            if diff <= 0:
+                continue
+            resultados.append((uid, material, centro, consignado, b2b, stock, cantidad_num, diff))
 
         return resultados, columnas
 
@@ -722,13 +772,3 @@ def _add_months(value: date, months: int) -> date:
     day = min(value.day, last_day)
     return date(year, month, day)
 
-
-def _guardar_log_igv(items: list[str], output_dir: Path) -> None:
-    # Guarda en TXT los ItemCode actualizados.
-    output_dir.mkdir(parents=True, exist_ok=True)
-    fecha = date.today().strftime("%Y%m%d")
-    ruta = output_dir / f"validar_igv_actualizados_{fecha}.txt"
-    with ruta.open("w", encoding="utf-8") as file:
-        file.write("ItemCode\n")
-        for item in items:
-            file.write(f"{item}\n")

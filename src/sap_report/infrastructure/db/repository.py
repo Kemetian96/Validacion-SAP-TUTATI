@@ -29,6 +29,7 @@ SAP_VALIDAR_IGV_PATH = Path(__file__).resolve().parent / "queries" / "validar_ig
 SAP_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_sap_items.sql"
 SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_comercial.sql"
 SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_pedral.sql"
+SAP_VALIDAR_IGV_UPDATE_HILOS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_hilos.sql"
 SAP_REVISAR_HILOS_PATH = Path(__file__).resolve().parent / "queries" / "revisar_hilos.sql"
 SAP_PRESTAMO_STOCK_PATH = Path(__file__).resolve().parent / "queries" / "prestamo_stock.sql"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
@@ -52,6 +53,7 @@ class SapHanaRepository:
         self._query_validar_igv_items = SAP_VALIDAR_IGV_ITEMS_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_update_comercial = SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_update_pedral = SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH.read_text(encoding="utf-8")
+        self._query_validar_igv_update_hilos = SAP_VALIDAR_IGV_UPDATE_HILOS_PATH.read_text(encoding="utf-8")
         self._query_revisar_hilos = SAP_REVISAR_HILOS_PATH.read_text(encoding="utf-8")
         self._query_prestamo_stock = SAP_PRESTAMO_STOCK_PATH.read_text(encoding="utf-8")
 
@@ -115,6 +117,14 @@ class SapHanaRepository:
             return 0
         items_in = _render_in_list(items)
         sql = self._query_validar_igv_update_pedral.replace("{{items_in}}", items_in)
+        return self._ejecutar_sql_modificacion(sql)
+
+    def ejecutar_actualizar_igv_hilos(self, docentries: list[str]) -> int:
+        # Actualiza U_BOT_HILOS y U_BOT_FLAG_ANULACION en SAP.
+        if not docentries:
+            return 0
+        doc_in = _render_in_list(docentries)
+        sql = self._query_validar_igv_update_hilos.replace("{{docentries_in}}", doc_in)
         return self._ejecutar_sql_modificacion(sql)
 
     def ejecutar_revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
