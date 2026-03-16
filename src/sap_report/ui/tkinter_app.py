@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -6,7 +7,7 @@ import tkinter as tk
 import webbrowser
 from datetime import date, datetime
 from tkinter import scrolledtext
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from typing import Any
 
 from sap_report.application import ReportService
@@ -313,7 +314,7 @@ def run_ui(
         prestamo_btn.state(["disabled"])
         set_estado("Validando IGV...")
 
-    def worker_igv() -> None:
+        def worker_igv() -> None:
             try:
                 resumen = service.validar_igv(status_cb=set_estado)
                 root.after(
@@ -377,6 +378,35 @@ def run_ui(
             cantidad = row[1] if len(row) > 1 else ""
             tree.insert("", "end", values=(hilo, cantidad))
 
+    def _mostrar_prestamo(rows: list[tuple[Any, ...]], cols: list[str]) -> None:
+        # Muestra resultados de prestamo en tabla.
+        window = tk.Toplevel(root)
+        window.title("Prestamo")
+        window.geometry("660x360")
+        window.configure(bg=bg)
+
+        table_frame = ttk.Frame(window)
+        table_frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        columns = tuple(c.lower() for c in cols)
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        for col in cols:
+            key = col.lower()
+            tree.heading(key, text=col)
+            width = 120 if key in ("material", "centro") else 140
+            tree.column(key, width=width, anchor="center")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        for row in rows:
+            tree.insert("", "end", values=row)
+
     def on_revisar_hilos() -> None:
         # Ejecuta revision de hilos sin bloquear la UI.
         if running["value"]:
@@ -410,8 +440,56 @@ def run_ui(
         threading.Thread(target=worker_hilos, daemon=True).start()
 
     def on_prestamo() -> None:
-        # Placeholder: logica de prestamo.
-        messagebox.showinfo("Prestamo", "Funcion pendiente de implementar.")
+        # Pide lista de U_BOT_DOCENTRY para consultar prestamo.
+        if running["value"]:
+            return
+        raw = simpledialog.askstring(
+            "Prestamo",
+            "Ingresa U_BOT_DOCENTRY (separados por coma o espacio):",
+            parent=root,
+        )
+        if not raw:
+            return
+        docentries = [val.strip() for val in re.split(r"[,\\s]+", raw) if val.strip()]
+        if not docentries:
+            messagebox.showwarning("Prestamo", "No se encontraron U_BOT_DOCENTRY validos.")
+            return
+        running["value"] = True
+        ejecutar_btn.state(["disabled"])
+        probar_btn.state(["disabled"])
+        validar_btn.state(["disabled"])
+        validar_igv_btn.state(["disabled"])
+        revisar_hilos_btn.state(["disabled"])
+        prestamo_btn.state(["disabled"])
+        set_estado(f"Prestamo: {len(docentries)} U_BOT_DOCENTRY recibidos.")
+
+        def worker_prestamo() -> None:
+            try:
+                rows, cols = service.consultar_prestamo(docentries, status_cb=set_estado)
+                if not rows:
+                    root.after(
+                        0,
+                        lambda: messagebox.showinfo(
+                            "Prestamo",
+                            "No se encontraron resultados para los U_BOT_DOCENTRY ingresados.",
+                        ),
+                    )
+                else:
+                    root.after(0, lambda: _mostrar_prestamo(rows, cols))
+                set_estado("Prestamo completado.")
+            except Exception as exc:
+                root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                set_estado(f"Error: {exc}")
+            finally:
+                running["value"] = False
+                root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                root.after(0, lambda: probar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+                root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
+                root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+
+        threading.Thread(target=worker_prestamo, daemon=True).start()
 
     ejecutar_btn.configure(command=on_run)
     probar_btn.configure(command=on_test)

@@ -294,6 +294,85 @@ class ReportService:
             "sp_rmas": ok_rmas,
         }
 
+    def consultar_prestamo(
+        self,
+        docentries: list[str],
+        status_cb=None,
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Flujo Prestamo: DocEntry -> documentos -> items -> stock SAP.
+        columnas = ["Material", "Centro", "Stock_SAP", "Cantidad_MYSQL", "Diferencia"]
+        if not docentries:
+            return [], columnas
+
+        if status_cb:
+            status_cb(f"Prestamo: consultando {len(docentries)} DocEntry en MySQL...")
+        doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
+        if not doc_rows:
+            return [], columnas
+
+        idx_doc_id = _find_col_index(doc_cols, ["id_document"])
+        document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
+        if not document_ids:
+            return [], columnas
+
+        if status_cb:
+            status_cb(f"Prestamo: consultando items ({len(document_ids)}) en MySQL...")
+        items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
+        if not items_rows:
+            return [], columnas
+
+        idx_material = _find_col_index(items_cols, ["material"])
+        idx_centro = _find_col_index(items_cols, ["centro"])
+        idx_matcentro = _find_col_index(items_cols, ["material_centro"])
+        idx_cantidad = _find_col_index(items_cols, ["cantidad"])
+
+        memoria: list[tuple[str, str, str, Any]] = []
+        materiales: set[str] = set()
+        centros: set[str] = set()
+
+        for row in items_rows:
+            material = str(row[idx_material]) if row[idx_material] is not None else ""
+            centro = str(row[idx_centro]) if row[idx_centro] is not None else ""
+            matcentro = str(row[idx_matcentro]) if row[idx_matcentro] is not None else material + centro
+            cantidad = row[idx_cantidad]
+            memoria.append((material, centro, matcentro, cantidad))
+            if material:
+                materiales.add(material)
+            if centro:
+                centros.add(centro)
+
+        if not materiales or not centros:
+            return [], columnas
+
+        if status_cb:
+            status_cb(
+                f"Prestamo: consultando SAP ({len(materiales)} materiales, {len(centros)} centros)..."
+            )
+        sap_rows, sap_cols = self._sap_repository.ejecutar_prestamo_stock(
+            sorted(materiales),
+            sorted(centros),
+        )
+        if not sap_rows:
+            return [], columnas
+
+        idx_itemwarehouse = _find_col_index(sap_cols, ["itemwarehouse"])
+        idx_stock = _find_col_index(sap_cols, ["stock"])
+        sap_map: dict[str, float] = {}
+        for row in sap_rows:
+            key = str(row[idx_itemwarehouse]).strip() if row[idx_itemwarehouse] is not None else ""
+            if not key:
+                continue
+            sap_map[key] = _to_float(row[idx_stock])
+
+        resultados: list[tuple[Any, ...]] = []
+        for material, centro, matcentro, cantidad in memoria:
+            stock = sap_map.get(matcentro, 0.0)
+            cantidad_num = _to_float(cantidad)
+            diff = cantidad_num - stock
+            resultados.append((material, centro, stock, cantidad_num, diff))
+
+        return resultados, columnas
+
     def revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Consulta de hilos pendientes en SAP.
         return self._sap_repository.ejecutar_revisar_hilos()

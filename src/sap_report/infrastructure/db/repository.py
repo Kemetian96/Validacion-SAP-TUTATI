@@ -30,6 +30,7 @@ SAP_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "vali
 SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_comercial.sql"
 SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_pedral.sql"
 SAP_REVISAR_HILOS_PATH = Path(__file__).resolve().parent / "queries" / "revisar_hilos.sql"
+SAP_PRESTAMO_STOCK_PATH = Path(__file__).resolve().parent / "queries" / "prestamo_stock.sql"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
 MYSQL_VALIDAR_IGV_DOCS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_docs.sql"
 MYSQL_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_items.sql"
@@ -52,6 +53,7 @@ class SapHanaRepository:
         self._query_validar_igv_update_comercial = SAP_VALIDAR_IGV_UPDATE_COMERCIAL_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_update_pedral = SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH.read_text(encoding="utf-8")
         self._query_revisar_hilos = SAP_REVISAR_HILOS_PATH.read_text(encoding="utf-8")
+        self._query_prestamo_stock = SAP_PRESTAMO_STOCK_PATH.read_text(encoding="utf-8")
 
     def ejecutar_consulta_sql(
         self,
@@ -118,6 +120,22 @@ class SapHanaRepository:
     def ejecutar_revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Ejecuta consulta de hilos pendientes en SAP.
         return self._ejecutar_sql(self._query_revisar_hilos)
+
+    def ejecutar_prestamo_stock(
+        self,
+        items: list[str],
+        centros: list[str],
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta consulta de stock por item/centro en SAP.
+        if not items or not centros:
+            return [], ["ItemCode", "WhsCode", "ItemWarehouse", "Stock", "Procencia"]
+        items_in = _render_in_list(items)
+        centros_in = _render_in_list(centros)
+        sql = (
+            self._query_prestamo_stock.replace("{{items_in}}", items_in)
+            .replace("{{centros_in}}", centros_in)
+        )
+        return self._ejecutar_sql(sql)
 
     def _ejecutar_sql(self, sql: str) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Reintenta la conexion ante fallos temporales.
