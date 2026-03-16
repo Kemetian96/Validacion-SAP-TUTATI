@@ -1,4 +1,5 @@
 import os
+from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -131,6 +132,6 @@ def load_settings() -> Settings:
         espera_segundos=int(_get_env("ESPERA_REINTENTO_SEGUNDOS", "10")),
         ui_width=int(_get_env("UI_WIDTH", "360")),
         ui_height=int(_get_env("UI_HEIGHT", "260")),
-        fecha_inicio_default=_get_env("FECHA_INICIO", "2026-01-01"),
-        fecha_fin_default=_get_env("FECHA_FIN", "2026-01-01"),
+        fecha_inicio_default=_get_env("FECHA_INICIO", date.today().strftime("%Y-%m-%d")),
+        fecha_fin_default=_get_env("FECHA_FIN", date.today().strftime("%Y-%m-%d")),
     )

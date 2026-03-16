@@ -5,7 +5,9 @@ import threading
 import tkinter as tk
 import webbrowser
 from datetime import date, datetime
+from tkinter import scrolledtext
 from tkinter import messagebox, ttk
+from typing import Any
 
 from sap_report.application import ReportService
 
@@ -71,18 +73,55 @@ def run_ui(
     root.geometry(f"{ui_width}x{ui_height}")
     root.resizable(False, False)
 
+    # Estilos visuales (tema claro con acento).
+    style = ttk.Style()
     try:
-        ttk.Style().theme_use("vista")
+        style.theme_use("clam")
     except tk.TclError:
         pass
+
+    bg = "#F6F7FB"
+    card_bg = "#FFFFFF"
+    accent = "#2B7A78"
+    accent_dark = "#1F5F5D"
+    text_main = "#1F2937"
+    text_muted = "#6B7280"
+
+    root.configure(bg=bg)
+    style.configure("TFrame", background=bg)
+    style.configure("Card.TFrame", background=card_bg, borderwidth=1, relief="solid")
+    style.configure("TLabel", background=bg, foreground=text_main, font=("Segoe UI", 10))
+    style.configure("Muted.TLabel", background=bg, foreground=text_muted, font=("Segoe UI", 9))
+    style.configure("Accent.TButton", background=accent, foreground="white", padding=(10, 6))
+    style.map(
+        "Accent.TButton",
+        background=[("active", accent_dark), ("pressed", accent_dark)],
+        foreground=[("active", "white"), ("pressed", "white")],
+    )
+    style.configure("Secondary.TButton", background=card_bg, foreground=text_main, padding=(10, 6))
+    style.configure("Small.TButton", background=card_bg, foreground=text_main, padding=(3, 3), font=("Segoe UI",7))
+    style.map(
+        "Secondary.TButton",
+        background=[("active", "#EEF2F7"), ("pressed", "#E5E7EB")],
+    )
 
     estado_var = tk.StringVar(value="Selecciona el rango y ejecuta.")
 
     # Layout principal.
-    main = ttk.Frame(root, padding=16)
+    main = ttk.Frame(root, padding=18)
     main.pack(fill="both", expand=True)
 
-    card = ttk.LabelFrame(main, text="Rango de fechas", padding=12)
+    title = ttk.Label(main, text="Reporte SAP", font=("Segoe UI", 12, "bold"), foreground=text_main)
+    title.pack(anchor="w", pady=(0, 8))
+
+    header = ttk.Frame(main)
+    header.pack(fill="x", pady=(0, 6))
+    header_label = ttk.Label(header, text="Rango de fechas", font=("Segoe UI", 10, "bold"), foreground=text_main)
+    header_label.pack(side="left")
+    probar_btn = ttk.Button(header, text="Probar conexion", width=14, style="Small.TButton")
+    probar_btn.pack(side="right")
+
+    card = ttk.Frame(main, padding=12, style="Card.TFrame")
     card.pack(fill="x")
 
     ttk.Label(card, text="Fecha inicio").grid(row=0, column=0, sticky="w", pady=(0, 8))
@@ -107,21 +146,25 @@ def run_ui(
     )
     fecha_fin_entry.grid(row=1, column=1, sticky="w", padx=(8, 0))
 
-    btn_row = ttk.Frame(main)
-    btn_row.pack(fill="x", pady=(14, 0))
-    ejecutar_btn = ttk.Button(btn_row, text="Ejecutar reporte", width=17)
-    ejecutar_btn.pack(side="left")
-    probar_btn = ttk.Button(btn_row, text="Probar conexion", width=17)
-    probar_btn.pack(side="left", padx=(8, 0))
+    actions = ttk.Frame(main)
+    actions.pack(fill="x", pady=(14, 0))
+    actions.grid_columnconfigure(0, weight=1)
+    actions.grid_columnconfigure(1, weight=1)
 
-    btn_row_2 = ttk.Frame(main)
-    btn_row_2.pack(fill="x", pady=(8, 0))
-    validar_btn = ttk.Button(btn_row_2, text="Validar Articulos", width=17)
-    validar_btn.pack(side="left")
-    validar_igv_btn = ttk.Button(btn_row_2, text="Validar Igv", width=17)
-    validar_igv_btn.pack(side="left", padx=(8, 0))
+    ejecutar_btn = ttk.Button(actions, text="Ejecutar reporte", width=17, style="Accent.TButton")
+    ejecutar_btn.grid(row=0, column=0, sticky="w")
+    validar_btn = ttk.Button(actions, text="Validar Articulos", width=17, style="Secondary.TButton")
+    validar_btn.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
-    ttk.Label(main, textvariable=estado_var).pack(anchor="w", pady=(14, 0))
+    validar_igv_btn = ttk.Button(actions, text="Validar Igv", width=17, style="Secondary.TButton")
+    validar_igv_btn.grid(row=1, column=0, sticky="w", pady=(8, 0))
+    revisar_hilos_btn = ttk.Button(actions, text="Revisar Hilos", width=17, style="Secondary.TButton")
+    revisar_hilos_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+
+    prestamo_btn = ttk.Button(actions, text="Prestamo", width=17, style="Secondary.TButton")
+    prestamo_btn.grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+    ttk.Label(main, textvariable=estado_var, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
 
     running = {"value": False}
 
@@ -217,6 +260,9 @@ def run_ui(
         ejecutar_btn.state(["disabled"])
         probar_btn.state(["disabled"])
         validar_btn.state(["disabled"])
+        validar_igv_btn.state(["disabled"])
+        revisar_hilos_btn.state(["disabled"])
+        prestamo_btn.state(["disabled"])
         set_estado("Validando articulos...")
 
         def worker_validar() -> None:
@@ -248,6 +294,9 @@ def run_ui(
                 root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
                 root.after(0, lambda: probar_btn.state(["!disabled"]))
                 root.after(0, lambda: validar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+                root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
+                root.after(0, lambda: prestamo_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_validar, daemon=True).start()
 
@@ -260,9 +309,11 @@ def run_ui(
         probar_btn.state(["disabled"])
         validar_btn.state(["disabled"])
         validar_igv_btn.state(["disabled"])
+        revisar_hilos_btn.state(["disabled"])
+        prestamo_btn.state(["disabled"])
         set_estado("Validando IGV...")
 
-        def worker_igv() -> None:
+    def worker_igv() -> None:
             try:
                 resumen = service.validar_igv(status_cb=set_estado)
                 root.after(
@@ -291,12 +342,82 @@ def run_ui(
                 root.after(0, lambda: probar_btn.state(["!disabled"]))
                 root.after(0, lambda: validar_btn.state(["!disabled"]))
                 root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+                root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
+                root.after(0, lambda: prestamo_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_igv, daemon=True).start()
+
+    def _mostrar_hilos(rows: list[tuple[Any, ...]]) -> None:
+        # Muestra resultados en una ventana tipo tabla.
+        window = tk.Toplevel(root)
+        window.title("Revisar Hilos")
+        window.geometry("360x320")
+        window.configure(bg=bg)
+
+        table_frame = ttk.Frame(window)
+        table_frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        columns = ("hilo", "cantidad")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        tree.heading("hilo", text="Hilo")
+        tree.heading("cantidad", text="Cantidad")
+        tree.column("hilo", width=160, anchor="w")
+        tree.column("cantidad", width=120, anchor="center")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        for row in rows:
+            hilo = row[0] if len(row) > 0 else ""
+            cantidad = row[1] if len(row) > 1 else ""
+            tree.insert("", "end", values=(hilo, cantidad))
+
+    def on_revisar_hilos() -> None:
+        # Ejecuta revision de hilos sin bloquear la UI.
+        if running["value"]:
+            return
+        running["value"] = True
+        ejecutar_btn.state(["disabled"])
+        probar_btn.state(["disabled"])
+        validar_btn.state(["disabled"])
+        validar_igv_btn.state(["disabled"])
+        revisar_hilos_btn.state(["disabled"])
+        prestamo_btn.state(["disabled"])
+        set_estado("Revisando hilos...")
+
+        def worker_hilos() -> None:
+            try:
+                rows, _cols = service.revisar_hilos()
+                root.after(0, lambda: _mostrar_hilos(rows))
+                set_estado("Revision de hilos completada.")
+            except Exception as exc:
+                root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                set_estado(f"Error: {exc}")
+            finally:
+                running["value"] = False
+                root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                root.after(0, lambda: probar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+                root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
+                root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+
+        threading.Thread(target=worker_hilos, daemon=True).start()
+
+    def on_prestamo() -> None:
+        # Placeholder: logica de prestamo.
+        messagebox.showinfo("Prestamo", "Funcion pendiente de implementar.")
 
     ejecutar_btn.configure(command=on_run)
     probar_btn.configure(command=on_test)
     validar_btn.configure(command=on_validar)
     validar_igv_btn.configure(command=on_validar_igv)
+    revisar_hilos_btn.configure(command=on_revisar_hilos)
+    prestamo_btn.configure(command=on_prestamo)
     # Inicia el loop de eventos de Tkinter.
     root.mainloop()

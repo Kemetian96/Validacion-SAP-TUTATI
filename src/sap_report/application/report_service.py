@@ -294,6 +294,10 @@ class ReportService:
             "sp_rmas": ok_rmas,
         }
 
+    def revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Consulta de hilos pendientes en SAP.
+        return self._sap_repository.ejecutar_revisar_hilos()
+
     def _ejecutar_por_lotes(
         self,
         fecha_inicio_date: date,
