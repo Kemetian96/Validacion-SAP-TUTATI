@@ -1,146 +1,284 @@
 # SAP Report
 
-Aplicacion de escritorio (Tkinter) para ejecutar reportes por rango de fechas contra dos fuentes:
+Aplicacion de escritorio en `Tkinter` para operar reportes y validaciones entre `SAP HANA`, `PostgreSQL` y `MySQL`.
 
-- SAP HANA
-- PostgreSQL
+El proyecto no es solo un exportador de Excel. Hoy concentra cuatro flujos operativos:
 
-Genera tres archivos Excel:
+- `Ejecutar reporte`: genera los reportes base SAP/TUTATI y el archivo de comparacion.
+- `Validar Articulos`: ejecuta una migracion previa en PostgreSQL y luego abre URLs de validacion en navegador.
+- `Validar Igv`: cruza SAP, MySQL y PostgreSQL para actualizar articulos, ejecutar SPs de movimiento y marcar documentos en SAP.
+- `Prestamo` y `Revisar Hilos`: consultas operativas de apoyo desde la UI.
 
-- `OUTPUT/SAP.xlsx`
-- `OUTPUT/TUTATI.xlsx`
-- `OUTPUT/COMPARACION.xlsx`
+## Objetivo
 
-## Funcionalidades
+Centralizar en una sola herramienta de escritorio:
 
-- Selector de fechas en UI (`yyyy-mm-dd`).
-- Boton para ejecutar reporte completo.
-- Boton para probar conexiones (SAP y PostgreSQL).
-- Ejecucion por lotes diarios para evitar consultas muy pesadas.
-- Reintentos de conexion configurables.
-- Exportacion de reportes base y acumulados de NC.
-- Comparacion entre SAP y TUTATI por identificador.
-- Deteccion de faltantes por cantidad de ocurrencias.
-- Deteccion de diferencias de monto con umbral (`|SUMA - TOTAL| > 0.1`).
+- ejecucion de consultas por rango de fechas;
+- exportacion de resultados a Excel;
+- comparaciones entre fuentes heterogeneas;
+- validaciones operativas que antes se hacian manualmente;
+- acciones de soporte sobre SAP y bases auxiliares.
+
+## Arquitectura
+
+El proyecto usa una separacion por capas sencilla y mantenible:
+
+- `src/sap_report/ui/`: interfaz `Tkinter`, formularios, ventanas auxiliares y eventos de botones.
+- `src/sap_report/application/`: orquestacion de casos de uso (`ReportService`).
+- `src/sap_report/domain/`: logica de dominio reutilizable, por ejemplo conversiones `fecha <-> CUID`.
+- `src/sap_report/infrastructure/config.py`: carga de configuracion, defaults y deteccion de placeholders en `.env`.
+- `src/sap_report/infrastructure/db/`: repositorios por motor (`SAP HANA`, `PostgreSQL`, `MySQL`) y sus queries SQL.
+- `src/sap_report/infrastructure/export/`: escritura y actualizacion de archivos Excel.
+- `app.py`: launcher rapido para desarrollo.
+- `src/sap_report/__main__.py`: entrada para ejecucion como modulo.
+
+La composicion principal se hace en [main.py](C:/Proyectos/SAP/src/sap_report/main.py).
 
 ## Requisitos
 
 - Python `>= 3.11`
-- Dependencias en `requirements.txt`
+- Windows
+- Acceso de red a las bases configuradas
+- Navegador Chrome o Brave para el flujo `Validar Articulos`
 
-Instalacion:
+Dependencias principales:
+
+- `pandas`
+- `openpyxl`
+- `psycopg2-binary`
+- `pymysql`
+- `hdbcli`
+- `python-dotenv`
+- `tkcalendar`
+
+## Instalacion
+
+Instalacion editable recomendada:
+
+```powershell
+pip install -e .
+```
+
+Alternativa simple:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-Ejecucion:
+## Ejecucion
+
+Modo recomendado:
+
+```powershell
+python -m sap_report
+```
+
+Con entrypoint del paquete:
+
+```powershell
+sap-report
+```
+
+Modo rapido para desarrollo:
 
 ```powershell
 python app.py
 ```
 
-## Configuracion (`.env`)
+## Configuracion
 
-Usa `.env.example` como base.
+La configuracion se lee desde `.env`. Puedes usar `.env.example` como plantilla base.
 
-### PostgreSQL
+El comportamiento actual es mixto:
 
-- `PG_HOST` (o alias legacy: `DB_HOST`)
-- `PG_NAME` (o alias legacy: `DB_NAME`, default `main`)
-- `PG_USER` (o alias legacy: `DB_USER`)
-- `PG_PASSWORD` (o alias legacy: `DB_PASSWORD`)
-- `PG_PORT` (o alias legacy: `DB_PORT`, default `5432`)
-- `PG_SSLMODE` (o alias legacy: `DB_SSLMODE`, default `require`)
-- `PG_CONNECT_TIMEOUT` (o alias legacy: `DB_CONNECT_TIMEOUT`, default `10`)
+- Si el `.env` contiene valores completos, la aplicacion arranca directo.
+- Si faltan variables o tienen placeholder tipo `????`, la app solicita solo esos campos al iniciar.
+- Los valores ingresados por popup se usan en memoria para esa ejecucion; no reescriben el `.env`.
 
-### SAP HANA
+### Variables obligatorias o esperadas
 
-- `SAP_HANA_HOST` (default `172.31.28.162`)
-- `SAP_HANA_PORT` (default `30015`)
-- `SAP_HANA_USER` (obligatoria)
-- `SAP_HANA_PASSWORD` (obligatoria)
-- `SAP_HANA_ENCRYPT` (`true/false`, opcional)
-- `SAP_HANA_SSL_VALIDATE_CERTIFICATE` (`true/false`, opcional)
-- `SAP_HANA_SSL_TRUST_STORE` (opcional)
-- `SAP_HANA_SSL_KEY_STORE_PASSWORD` (opcional)
-- `SAP_HANA_CONNECT_TIMEOUT` (opcional)
+PostgreSQL:
 
-### Salidas y ejecucion
+- `PG_HOST` o `DB_HOST`
+- `PG_NAME` o `DB_NAME`
+- `PG_USER` o `DB_USER`
+- `PG_PASSWORD` o `DB_PASSWORD`
+- `PG_PORT` o `DB_PORT` (`5432` por defecto)
+- `PG_SSLMODE` o `DB_SSLMODE` (`require` por defecto)
+- `PG_CONNECT_TIMEOUT` o `DB_CONNECT_TIMEOUT` (`10` por defecto)
 
-- `SAP_OUTPUT_PATH` (default `OUTPUT/SAP.xlsx`)
-- `PG_OUTPUT_PATH` (default `OUTPUT/TUTATI.xlsx`)
-- `COMPARACION_OUTPUT_PATH` (default `OUTPUT/COMPARACION.xlsx`)
-- `REINTENTOS_CONEXION` (default `5`)
-- `ESPERA_REINTENTO_SEGUNDOS` (default `10`)
-- `FECHA_INICIO` (default `2026-01-01`)
-- `FECHA_FIN` (default `2026-01-01`)
+SAP HANA:
 
-### UI
+- `SAP_HANA_HOST` (`172.31.28.162` por defecto)
+- `SAP_HANA_PORT` (`30015` por defecto)
+- `SAP_HANA_USER`
+- `SAP_HANA_PASSWORD`
+- `SAP_HANA_ENCRYPT`
+- `SAP_HANA_SSL_VALIDATE_CERTIFICATE`
+- `SAP_HANA_SSL_TRUST_STORE`
+- `SAP_HANA_SSL_KEY_STORE_PASSWORD`
+- `SAP_HANA_CONNECT_TIMEOUT`
 
-- `UI_WIDTH` (default `360`)
-- `UI_HEIGHT` (default `260`)
+MySQL:
 
-## Consultas SQL
+- `MYSQL_HOST`
+- `MYSQL_NAME`
+- `MYSQL_USER`
+- `MYSQL_PASSWORD`
+- `MYSQL_PORT` (`3306` por defecto)
+- `MYSQL_CONNECT_TIMEOUT` (`10` por defecto)
 
-Rutas:
+Salidas:
 
-- `src/sap_report/infrastructure/db/queries/SAP.sql`
-- `src/sap_report/infrastructure/db/queries/sap_nc.sql`
-- `src/sap_report/infrastructure/db/queries/TUTATI.sql`
-- `src/sap_report/infrastructure/db/queries/tutati_nc.sql`
+- `SAP_OUTPUT_PATH` (`OUTPUT/SAP.xlsx`)
+- `PG_OUTPUT_PATH` (`OUTPUT/TUTATI.xlsx`)
+- `COMPARACION_OUTPUT_PATH` (`OUTPUT/COMPARACION.xlsx`)
 
-Reglas de parametros:
+Parametros generales:
 
-- SAP usa reemplazo de plantilla: `{{fecha_inicio}}` y `{{fecha_fin}}` en formato `YYYY-MM-DD`.
-- PostgreSQL usa parametros `%(fecha1)s` y `%(fecha2)s` (rango CUID).
+- `REINTENTOS_CONEXION` (`5`)
+- `ESPERA_REINTENTO_SEGUNDOS` (`10`)
+- `FECHA_INICIO`
+- `FECHA_FIN`
+- `UI_WIDTH`
+- `UI_HEIGHT`
 
-## Salidas Excel
+### Nota importante sobre rutas de salida
 
-### `SAP.xlsx`
+Si usas rutas relativas como `OUTPUT/SAP.xlsx`, el archivo se genera relativo al directorio desde el que ejecutas la app. Si necesitas un comportamiento estable para usuarios finales o un `.exe`, conviene usar rutas absolutas.
 
-- Hoja `Reporte`: resultado de `SAP.sql`.
-- Hoja `Acumulado_NC`: consolidado por referencia de `sap_nc.sql`.
+## Flujo de la interfaz
 
-### `TUTATI.xlsx`
+La ventana principal expone cinco acciones:
 
-- Hoja `Reporte`: resultado de `TUTATI.sql`.
-- Hoja `Acumulado_NC`: consolidado por EID de `tutati_nc.sql`.
+- `Probar conexion`: valida conectividad a `SAP`, `PostgreSQL` y `MySQL` sin ejecutar reportes pesados.
+- `Validar Articulos`: ejecuta `migrar_OC` en PostgreSQL para ayer y anteayer, luego consulta SAP y abre URLs de validacion en navegador.
+- `Validar Igv`: toma documentos desde SAP, cruza con MySQL, valida articulos IGV en SAP, ejecuta updates y SPs operativos, y muestra los `U_BOT_DOCENTRY` evaluados en una ventana copiable.
+- `Revisar Hilos`: muestra el conteo de hilos pendientes en una tabla auxiliar.
+- `Prestamo`: recibe una lista manual de `U_BOT_DOCENTRY`, cruza MySQL y SAP, y muestra diferencias positivas de stock en una tabla copiable.
+- `Ejecutar reporte`: corre el proceso principal de exportacion y comparacion por rango de fechas.
 
-### `COMPARACION.xlsx`
+## Proceso principal
 
-- Hoja `Comparacion`: comparacion del reporte base.
-- Hoja `Comparacion_NC`: comparacion del reporte NC.
+El boton `Ejecutar reporte` hace lo siguiente:
 
-Cada hoja de comparacion contiene 3 bloques en una misma pestaña, separados por 1 columna:
+1. Ejecuta `SAP.sql` por lotes diarios.
+2. Exporta el resultado a `SAP.xlsx`.
+3. Ejecuta `sap_nc.sql` y agrega la pestana `Acumulado_NC` en `SAP.xlsx`.
+4. Ejecuta `TUTATI.sql` por lotes diarios.
+5. Exporta el resultado a `TUTATI.xlsx`.
+6. Ejecuta `tutati_nc.sql` y agrega la pestana `Acumulado_NC` en `TUTATI.xlsx`.
+7. Si ambas fuentes salieron bien, genera `COMPARACION.xlsx` con:
+   - `Comparacion`
+   - `Comparacion_NC`
+
+Cada hoja de comparacion contiene tres bloques en una misma pestaña:
 
 - `RESUMEN`
 - `FALTANTES`
 - `DIFERENCIAS`
 
-Columnas actuales del bloque `DIFERENCIAS`:
+La comparacion de montos usa umbral `0.12`.
 
-- `u_bot_docentry`
-- `uid_orders`
-- `fecha`
-- `suma_sap`
-- `total_tutati`
-- `diferencia`
+## Archivos SQL
 
-## Estructura del proyecto
+Queries principales:
 
-- `app.py`: launcher.
-- `src/sap_report/main.py`: composicion de dependencias e inicio UI.
-- `src/sap_report/ui/`: interfaz Tkinter.
-- `src/sap_report/application/`: logica de caso de uso (`ReportService`).
-- `src/sap_report/domain/`: utilidades de dominio (ej. conversion a CUID).
-- `src/sap_report/infrastructure/config.py`: carga y validacion de entorno.
-- `src/sap_report/infrastructure/db/repository.py`: acceso a SAP HANA y PostgreSQL.
-- `src/sap_report/infrastructure/export/excel_writer.py`: escritura Excel.
-- `tests/unit/`: pruebas unitarias.
+- [SAP.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/SAP.sql)
+- [sap_nc.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/sap_nc.sql)
+- [TUTATI.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/TUTATI.sql)
+- [tutati_nc.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/tutati_nc.sql)
 
-## Notas tecnicas
+Queries operativos:
 
-- Si en una ruta de salida configuras `.xls`, la app exporta automaticamente a `.xlsx`.
-- Si falla una fuente, se registra el error y se intenta continuar con la otra.
-- Si fallan ambas fuentes, la ejecucion termina con error global.
+- [validar_articulos.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_articulos.sql)
+- [validar_igv_sap.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_sap.sql)
+- [validar_igv_sap_items.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_sap_items.sql)
+- [validar_igv_update_comercial.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_update_comercial.sql)
+- [validar_igv_update_pedral.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_update_pedral.sql)
+- [validar_igv_update_hilos.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_update_hilos.sql)
+- [validar_igv_mysql_docs.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_mysql_docs.sql)
+- [validar_igv_mysql_items.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_mysql_items.sql)
+- [validar_igv_mysql_pendientes_orders.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_mysql_pendientes_orders.sql)
+- [validar_igv_mysql_pendientes_rmas.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/validar_igv_mysql_pendientes_rmas.sql)
+- [migrar_OC.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/migrar_OC.sql)
+- [prestamo_stock.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/prestamo_stock.sql)
+- [revisar_hilos.sql](C:/Proyectos/SAP/src/sap_report/infrastructure/db/queries/revisar_hilos.sql)
+
+Reglas de parametrizacion:
+
+- SAP usa placeholders `{{fecha_inicio}}`, `{{fecha_fin}}`, `{{items_in}}`, `{{docentries_in}}`, etc.
+- PostgreSQL y MySQL mezclan placeholders manuales renderizados por la app con parametros SQL segun el caso.
+
+## Salidas Excel
+
+`SAP.xlsx`
+
+- Hoja principal con el resultado de `SAP.sql`
+- Hoja `Acumulado_NC`
+
+`TUTATI.xlsx`
+
+- Hoja principal con el resultado de `TUTATI.sql`
+- Hoja `Acumulado_NC`
+
+`COMPARACION.xlsx`
+
+- Hoja `Comparacion`
+- Hoja `Comparacion_NC`
+
+Las ventanas auxiliares de `Prestamo`, `Revisar Hilos` y `U_BOT_DOCENTRY evaluados` no generan archivos adicionales; se muestran en pantalla y permiten copiar datos.
+
+## Empaquetado
+
+Para desarrollo, el launcher rapido sigue siendo [app.py](C:/Proyectos/SAP/app.py). Para distribucion o automatizacion, la forma mas limpia es usar el paquete:
+
+```powershell
+python -m sap_report
+```
+
+El proyecto ya expone el script `sap-report` en [pyproject.toml](C:/Proyectos/SAP/pyproject.toml).
+
+Si vas a generar un `.exe`, ten en cuenta:
+
+- la app depende de acceso de red a las bases;
+- los archivos SQL deben viajar con el paquete;
+- las rutas relativas de salida dependen del directorio de ejecucion;
+- el `.env` externo sigue siendo la opcion mas simple, aunque la app ya soporta pedir credenciales faltantes por popup.
+
+## Desarrollo y pruebas
+
+Pruebas actuales:
+
+```powershell
+pytest
+```
+
+La cobertura automatizada todavia es baja. Hoy existen pruebas unitarias basicas en `tests/unit`, pero los flujos principales dependen bastante de integraciones reales con base de datos.
+
+## Observaciones operativas
+
+- El proceso principal trabaja por lotes diarios para reducir riesgo de timeouts.
+- Si una de las fuentes falla en `Ejecutar reporte`, la app intenta continuar con la otra y reporta el error por separado.
+- Si fallan SAP y PostgreSQL al mismo tiempo, el proceso principal termina con error global.
+- `Validar Articulos` y `Validar Igv` no son solo consultas: ejecutan acciones operativas sobre otros sistemas.
+- `Prestamo` filtra solo diferencias positivas (`Cantidad_MYSQL - Stock_SAP > 0`).
+
+## Estructura resumida
+
+```text
+SAP/
+|-- app.py
+|-- pyproject.toml
+|-- README.md
+|-- src/
+|   `-- sap_report/
+|       |-- __main__.py
+|       |-- main.py
+|       |-- logging_config.py
+|       |-- application/
+|       |-- domain/
+|       |-- infrastructure/
+|       `-- ui/
+`-- tests/
+```
