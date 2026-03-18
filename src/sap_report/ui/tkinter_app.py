@@ -592,3 +592,33 @@ def run_ui(
     prestamo_btn.configure(command=on_prestamo)
     # Inicia el loop de eventos de Tkinter.
     root.mainloop()
+
+
+def prompt_env_vars(fields: list[dict[str, object]]) -> dict[str, str]:
+    # Solicita credenciales si faltan en .env.
+    if not fields:
+        return {}
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    result: dict[str, str] = {}
+    for field in fields:
+        label = str(field.get("label", field.get("key", "")))
+        key = str(field.get("key", ""))
+        secret = bool(field.get("secret", False))
+        while True:
+            value = simpledialog.askstring(
+                "Credenciales requeridas",
+                f"Ingrese {label}:",
+                show="*" if secret else None,
+                parent=root,
+            )
+            if value is None:
+                root.destroy()
+                raise RuntimeError("Ingreso de credenciales cancelado.")
+            value = value.strip()
+            if value:
+                result[key] = value
+                break
+    root.destroy()
+    return result

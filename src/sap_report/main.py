@@ -1,13 +1,21 @@
 from sap_report.application import ReportService
-from sap_report.infrastructure import load_settings
+import os
+
+from sap_report.infrastructure import get_missing_env_fields, load_settings
 from sap_report.infrastructure.db import MySQLRepository, PostgresRepository, SapHanaRepository
 from sap_report.logging_config import configure_logging
-from sap_report.ui import run_ui
+from sap_report.ui import prompt_env_vars, run_ui
 
 
 def main() -> None:
     # Inicializa logging global de la app.
     configure_logging()
+    # Solicita credenciales faltantes si .env tiene placeholders.
+    missing_fields = get_missing_env_fields()
+    if missing_fields:
+        values = prompt_env_vars(missing_fields)
+        for key, value in values.items():
+            os.environ[key] = value
     # Carga variables de entorno y defaults.
     settings = load_settings()
     # Crea repositorios para ambas fuentes de datos.

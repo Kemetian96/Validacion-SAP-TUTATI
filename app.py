@@ -1,14 +1,15 @@
 from pathlib import Path
 import sys
 
-
-# Agrega `src` al path para ejecutar sin instalar el paquete.
-ROOT_DIR = Path(__file__).resolve().parent
-SRC_DIR = ROOT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from sap_report.main import main
+try:
+    from sap_report.main import main
+except ModuleNotFoundError:
+    # Fallback rapido para ejecutar sin instalar el paquete.
+    root_dir = Path(__file__).resolve().parent
+    src_dir = root_dir / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from sap_report.main import main
 
 
 # Punto de entrada de la aplicacion.

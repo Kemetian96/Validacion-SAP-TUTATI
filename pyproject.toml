@@ -17,6 +17,9 @@ dependencies = [
   "tkcalendar",
 ]
 
+[project.scripts]
+sap-report = "sap_report.main:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
