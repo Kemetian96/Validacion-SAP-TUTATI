@@ -32,6 +32,9 @@ SAP_VALIDAR_IGV_UPDATE_PEDRAL_PATH = Path(__file__).resolve().parent / "queries"
 SAP_VALIDAR_IGV_UPDATE_HILOS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_update_hilos.sql"
 SAP_REVISAR_HILOS_PATH = Path(__file__).resolve().parent / "queries" / "revisar_hilos.sql"
 SAP_PRESTAMO_STOCK_PATH = Path(__file__).resolve().parent / "queries" / "prestamo_stock.sql"
+SAP_PRESTAMO_LOGPROCESO_PATH = Path(__file__).resolve().parent / "queries" / "prestamo_logproceso.sql"
+SAP_VALIDACION_NC_PATH = Path(__file__).resolve().parent / "queries" / "ValidacionNC.sql"
+SAP_VALIDACION_NC_ARTICULOS_PATH = Path(__file__).resolve().parent / "queries" / "ValidacionNCArticulos.sql"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
 MYSQL_VALIDAR_IGV_DOCS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_docs.sql"
 MYSQL_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_items.sql"
@@ -56,6 +59,11 @@ class SapHanaRepository:
         self._query_validar_igv_update_hilos = SAP_VALIDAR_IGV_UPDATE_HILOS_PATH.read_text(encoding="utf-8")
         self._query_revisar_hilos = SAP_REVISAR_HILOS_PATH.read_text(encoding="utf-8")
         self._query_prestamo_stock = SAP_PRESTAMO_STOCK_PATH.read_text(encoding="utf-8")
+        self._query_prestamo_logproceso = SAP_PRESTAMO_LOGPROCESO_PATH.read_text(encoding="utf-8")
+        self._query_validacion_nc = SAP_VALIDACION_NC_PATH.read_text(encoding="utf-8")
+        self._query_validacion_nc_articulos = SAP_VALIDACION_NC_ARTICULOS_PATH.read_text(
+            encoding="utf-8"
+        )
 
     def ejecutar_consulta_sql(
         self,
@@ -145,6 +153,39 @@ class SapHanaRepository:
             self._query_prestamo_stock.replace("{{items_in}}", items_in)
             .replace("{{centros_in}}", centros_in)
         )
+        return self._ejecutar_sql(sql)
+
+    def obtener_docentries_prestamo(
+        self,
+        fecha_desde: date,
+    ) -> list[str]:
+        # Busca DocEntry afectados por error de inventario negativo.
+        sql = self._query_prestamo_logproceso.replace(
+            "{{fecha_desde}}", fecha_desde.strftime("%Y-%m-%d")
+        )
+        rows, _cols = self._ejecutar_sql(sql)
+        return [str(row[0]).strip() for row in rows if row and row[0] is not None and str(row[0]).strip()]
+
+    def ejecutar_validacion_nc(
+        self,
+        docentries: list[str],
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Valida U_BOT_DOCENTRY de NC contra ORIN.
+        if not docentries:
+            return [], ["DocEntry", "U_BOT_DOCENTRY"]
+        docentries_in = _render_in_list(docentries)
+        sql = self._query_validacion_nc.replace("{{U_BOT_DOCENTRY}}", docentries_in)
+        return self._ejecutar_sql(sql)
+
+    def ejecutar_validacion_nc_articulos(
+        self,
+        docentries: list[str],
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Obtiene articulos por DocEntry para excluir NC especiales.
+        if not docentries:
+            return [], ["DocEntry", "U_BOT_CODARTICULO"]
+        docentries_in = _render_in_list(docentries)
+        sql = self._query_validacion_nc_articulos.replace("{{DOCENTRY_IN}}", docentries_in)
         return self._ejecutar_sql(sql)
 
     def _ejecutar_sql(self, sql: str) -> tuple[list[tuple[Any, ...]], list[str]]:

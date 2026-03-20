@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -448,10 +447,10 @@ def run_ui(
             side="left", padx=(8, 0)
         )
 
-    def _mostrar_docentries(docentries: list[str]) -> None:
+    def _mostrar_docentries(docentries: list[str], title: str = "U_BOT_DOCENTRY evaluados") -> None:
         # Muestra lista de U_BOT_DOCENTRY con opcion de copiar.
         window = tk.Toplevel(root)
-        window.title(f"U_BOT_DOCENTRY evaluados ({len(docentries)})")
+        window.title(f"{title} ({len(docentries)})")
         _centrar_ventana(window, 420, 460)
         window.configure(bg=bg)
 
@@ -533,19 +532,8 @@ def run_ui(
         threading.Thread(target=worker_hilos, daemon=True).start()
 
     def on_prestamo() -> None:
-        # Pide lista de U_BOT_DOCENTRY para consultar prestamo.
+        # Ejecuta Prestamo usando U_BOT_KEY detectados en LOGPROCESO.
         if running["value"]:
-            return
-        raw = simpledialog.askstring(
-            "Prestamo",
-            "Ingresa U_BOT_DOCENTRY (separados por coma o espacio):",
-            parent=root,
-        )
-        if not raw:
-            return
-        docentries = [val.strip() for val in re.split(r"[,\\s]+", raw) if val.strip()]
-        if not docentries:
-            messagebox.showwarning("Prestamo", "No se encontraron U_BOT_DOCENTRY validos.")
             return
         running["value"] = True
         ejecutar_btn.state(["disabled"])
@@ -554,17 +542,19 @@ def run_ui(
         validar_igv_btn.state(["disabled"])
         revisar_hilos_btn.state(["disabled"])
         prestamo_btn.state(["disabled"])
-        set_estado(f"Prestamo: {len(docentries)} U_BOT_DOCENTRY recibidos.")
+        set_estado("Prestamo: buscando casos con inventario negativo...")
 
         def worker_prestamo() -> None:
             try:
-                rows, cols = service.consultar_prestamo(docentries, status_cb=set_estado)
+                rows, cols, docentries = service.consultar_prestamo(status_cb=set_estado)
+                if docentries:
+                    root.after(0, lambda: _mostrar_docentries(docentries, "U_BOT_DOCENTRY Prestamo"))
                 if not rows:
                     root.after(
                         0,
                         lambda: messagebox.showinfo(
                             "Prestamo",
-                            "No se encontraron resultados para los U_BOT_DOCENTRY ingresados.",
+                            "No se encontraron resultados para los U_BOT_KEY detectados en los ultimos 3 dias.",
                         ),
                     )
                 else:

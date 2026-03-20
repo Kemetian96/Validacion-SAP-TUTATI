@@ -215,6 +215,7 @@ class ReportService:
         hoy = date.today()
         fecha_inicio = hoy - timedelta(days=3)
         fecha_fin = hoy + timedelta(days=1)
+        upd_hilos = 0
         if status_cb:
             status_cb(f"Validando IGV en SAP: {fecha_inicio} -> {fecha_fin}")
 
@@ -310,7 +311,6 @@ class ReportService:
             status_cb(f"Ejecutando SP RMA: {len(uid_rmas)}")
         ok_rmas = self._mysql_repository.ejecutar_sp_create_document_movement(uid_rmas, "RMA")
 
-        upd_hilos = 0
         if docentries_out:
             if status_cb:
                 status_cb(f"Actualizando Hilos en SAP: {len(docentries_out)} DocEntry")
@@ -329,10 +329,9 @@ class ReportService:
 
     def consultar_prestamo(
         self,
-        docentries: list[str],
         status_cb=None,
-    ) -> tuple[list[tuple[Any, ...]], list[str]]:
-        # Flujo Prestamo: DocEntry -> documentos -> items -> stock SAP.
+    ) -> tuple[list[tuple[Any, ...]], list[str], list[str]]:
+        # Flujo Prestamo: LOGPROCESO -> DocEntry -> documentos -> items -> stock SAP.
         columnas = [
             "UID_ORDERS",
             "Material",
@@ -343,25 +342,29 @@ class ReportService:
             "Cantidad_MYSQL",
             "Diferencia",
         ]
+        fecha_desde = date.today() - timedelta(days=3)
+        if status_cb:
+            status_cb(f"Prestamo: buscando U_BOT_KEY desde {fecha_desde}...")
+        docentries = self._sap_repository.obtener_docentries_prestamo(fecha_desde)
         if not docentries:
-            return [], columnas
+            return [], columnas, []
 
         if status_cb:
             status_cb(f"Prestamo: consultando {len(docentries)} DocEntry en MySQL...")
         doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
         if not doc_rows:
-            return [], columnas
+            return [], columnas, docentries
 
         idx_doc_id = _find_col_index(doc_cols, ["id_document"])
         document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
         if not document_ids:
-            return [], columnas
+            return [], columnas, docentries
 
         if status_cb:
             status_cb(f"Prestamo: consultando items ({len(document_ids)}) en MySQL...")
         items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
         if not items_rows:
-            return [], columnas
+            return [], columnas, docentries
 
         idx_uid = _find_col_index_optional(items_cols, ["uid_orders"])
         idx_material = _find_col_index(items_cols, ["material"])
@@ -390,7 +393,7 @@ class ReportService:
                 centros.add(centro)
 
         if not materiales or not centros:
-            return [], columnas
+            return [], columnas, docentries
 
         if status_cb:
             status_cb(
@@ -401,7 +404,7 @@ class ReportService:
             sorted(centros),
         )
         if not sap_rows:
-            return [], columnas
+            return [], columnas, docentries
 
         idx_itemwarehouse = _find_col_index(sap_cols, ["itemwarehouse"])
         idx_stock = _find_col_index(sap_cols, ["stock"])
@@ -421,7 +424,7 @@ class ReportService:
                 continue
             resultados.append((uid, material, centro, consignado, b2b, stock, cantidad_num, diff))
 
-        return resultados, columnas
+        return resultados, columnas, docentries
 
     def revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Consulta de hilos pendientes en SAP.
@@ -557,12 +560,23 @@ class ReportService:
             "faltan_en_sap": len(faltan_en_sap),
             "faltan_en_tutati": len(faltan_en_tutati),
         }
+        extra_title: str | None = None
+        extra_rows: list[dict[str, str]] | None = None
+        if sheet_name == "Comparacion_NC":
+            extra_title = "VALIDACION_NC"
+            extra_rows = _calcular_diferencias_validacion_nc(
+                sap_rows,
+                sap_cols,
+                self._sap_repository,
+            )
         exportar_comparacion(
             resumen,
             faltantes,
             diferencias,
             self._comparacion_output_path,
             sheet_name=sheet_name,
+            extra_title=extra_title,
+            extra_rows=extra_rows,
         )
 
 
@@ -744,6 +758,82 @@ def _acumular_tutati_nc(
     return data, ["eid", "uid_rmas_referencia", "total_acumulado"]
 
 
+def _calcular_diferencias_validacion_nc(
+    sap_rows: list[tuple[Any, ...]],
+    sap_cols: list[str],
+    sap_repository: SapHanaRepository,
+) -> list[dict[str, str]]:
+    # Valida que los U_BOT_DOCENTRY de NC existan en ORIN.
+    idx_doc = _find_col_index(sap_cols, ["u_bot_docentry"])
+    idx_fecha = _find_col_index_optional(sap_cols, ["fecha"])
+
+    sap_items: list[dict[str, str]] = []
+    docentries: list[str] = []
+    for row in sap_rows:
+        docentry = str(row[idx_doc]).strip() if row[idx_doc] is not None else ""
+        if not docentry:
+            continue
+        fecha = str(row[idx_fecha]).strip() if idx_fecha is not None and row[idx_fecha] is not None else ""
+        sap_items.append({"u_bot_docentry": docentry, "fecha": fecha})
+        docentries.append(docentry)
+
+    if not docentries:
+        return []
+
+    validacion_rows, validacion_cols = sap_repository.ejecutar_validacion_nc(list(dict.fromkeys(docentries)))
+    idx_valid_doc = _find_col_index_optional(validacion_cols, ["u_bot_docentry"])
+    if idx_valid_doc is None:
+        idx_valid_doc = _find_col_index_optional(validacion_cols, ["docentry"])
+    encontrados = {
+        str(row[idx_valid_doc]).strip()
+        for row in validacion_rows
+        if idx_valid_doc is not None and row[idx_valid_doc] is not None and str(row[idx_valid_doc]).strip()
+    }
+
+    faltantes_candidatos: list[str] = []
+    vistos_faltantes: set[str] = set()
+    for item in sap_items:
+        docentry = item["u_bot_docentry"]
+        if docentry in encontrados or docentry in vistos_faltantes:
+            continue
+        faltantes_candidatos.append(docentry)
+        vistos_faltantes.add(docentry)
+
+    articulos_por_doc: dict[str, set[str]] = {}
+    if faltantes_candidatos:
+        articulos_rows, articulos_cols = sap_repository.ejecutar_validacion_nc_articulos(
+            faltantes_candidatos
+        )
+        idx_art_doc = _find_col_index(articulos_cols, ["docentry"])
+        idx_art_cod = _find_col_index(articulos_cols, ["u_bot_codarticulo"])
+        for row in articulos_rows:
+            docentry = str(row[idx_art_doc]).strip() if row[idx_art_doc] is not None else ""
+            articulo = str(row[idx_art_cod]).strip() if row[idx_art_cod] is not None else ""
+            if not docentry or not articulo:
+                continue
+            articulos_por_doc.setdefault(docentry, set()).add(articulo)
+
+    diferencias: list[dict[str, str]] = []
+    vistos: set[str] = set()
+    for item in sap_items:
+        docentry = item["u_bot_docentry"]
+        if docentry in encontrados or docentry in vistos:
+            continue
+        articulos_doc = articulos_por_doc.get(docentry, set())
+        if articulos_doc == {"70000192"}:
+            vistos.add(docentry)
+            continue
+        diferencias.append(
+            {
+                "u_bot_docentry": docentry,
+                "fecha": item["fecha"],
+                "diferencia": "FALTA_EN_ORIN",
+            }
+        )
+        vistos.add(docentry)
+    return diferencias
+
+
 def _find_col_index_optional(cols: list[str], candidates: list[str]) -> int | None:
     # Busca columna opcional; si no existe devuelve None.
     normalized = {c.strip().lower(): i for i, c in enumerate(cols)}
@@ -771,4 +861,3 @@ def _add_months(value: date, months: int) -> date:
     last_day = calendar.monthrange(year, month)[1]
     day = min(value.day, last_day)
     return date(year, month, day)
-

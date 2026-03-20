@@ -75,6 +75,8 @@ def exportar_comparacion(
     diferencias: list[dict[str, str | float]],
     ruta: Path,
     sheet_name: str = "Comparacion",
+    extra_title: str | None = None,
+    extra_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     # Una sola pestaña con 3 bloques: Resumen | Faltantes | Diferencias.
     ruta = Path(ruta)
@@ -95,6 +97,7 @@ def exportar_comparacion(
         "total_tutati": 0.0,
         "diferencia": 0.0,
     }]
+    extra_block_rows = extra_rows or []
 
     if ruta.exists():
         wb = load_workbook(ruta)
@@ -122,8 +125,10 @@ def exportar_comparacion(
     start_faltantes = 1 + width_resumen + 1
     width_faltantes = write_block("FALTANTES", faltantes_rows, start_faltantes)
     start_diferencias = start_faltantes + width_faltantes + 1
-    write_block("DIFERENCIAS", diferencias_rows, start_diferencias)
+    width_diferencias = write_block("DIFERENCIAS", diferencias_rows, start_diferencias)
+    if extra_title and extra_block_rows:
+        start_extra = start_diferencias + width_diferencias + 1
+        write_block(extra_title, extra_block_rows, start_extra)
 
     ws.freeze_panes = "A3"
     wb.save(ruta)
-
