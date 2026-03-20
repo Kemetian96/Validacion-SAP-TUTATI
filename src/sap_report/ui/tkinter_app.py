@@ -328,10 +328,12 @@ def run_ui(
                     0,
                     lambda: messagebox.showinfo(
                         "Validar Igv",
+                        "U_BOT_DOCENTRY detectados: {sap_docentries}\n"
                         "Items total: {items_total}\nItems IGV: {items_igv}\n"
                         "Actualizados Comercial: {upd_comercial}\nActualizados Pedral: {upd_pedral}\n"
                         "Hilos actualizados: {upd_hilos}\n"
                         "SP ORDER ejecutados: {sp_orders}\nSP RMA ejecutados: {sp_rmas}".format(
+                            sap_docentries=resumen["sap_docentries"],
                             items_total=resumen["items_total"],
                             items_igv=resumen["items_igv"],
                             upd_comercial=resumen["upd_comercial"],
@@ -344,7 +346,7 @@ def run_ui(
                 )
                 docentries = resumen.get("docentries", [])
                 if docentries:
-                    root.after(0, lambda: _mostrar_docentries(docentries))
+                    root.after(0, lambda: _mostrar_docentries(docentries, "U_BOT_DOCENTRY Validar IGV"))
                 set_estado("Validacion IGV completada.")
             except Exception as exc:
                 root.after(0, lambda: messagebox.showerror("Error", str(exc)))
@@ -546,9 +548,7 @@ def run_ui(
 
         def worker_prestamo() -> None:
             try:
-                rows, cols, docentries = service.consultar_prestamo(status_cb=set_estado)
-                if docentries:
-                    root.after(0, lambda: _mostrar_docentries(docentries, "U_BOT_DOCENTRY Prestamo"))
+                rows, cols = service.consultar_prestamo(status_cb=set_estado)
                 if not rows:
                     root.after(
                         0,

@@ -210,7 +210,7 @@ class ReportService:
             status_cb(f"Validando articulos: {fecha_inicio} -> {fecha_fin}")
         return self._sap_repository.ejecutar_validar_articulos(fecha_inicio, fecha_fin)
 
-    def validar_igv(self, status_cb=None) -> dict[str, int]:
+    def validar_igv(self, status_cb=None) -> dict[str, Any]:
         # Rango para IGV: maximo ultimos 3 dias (usando > inicio y < fin).
         hoy = date.today()
         fecha_inicio = hoy - timedelta(days=3)
@@ -222,6 +222,7 @@ class ReportService:
         sap_rows, sap_cols = self._sap_repository.ejecutar_validar_igv(fecha_inicio, fecha_fin)
         if not sap_cols:
             return {
+                "sap_docentries": 0,
                 "items_total": 0,
                 "items_igv": 0,
                 "upd_comercial": 0,
@@ -252,6 +253,7 @@ class ReportService:
         doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
         if not doc_rows:
             return {
+                "sap_docentries": len(docentries_out),
                 "items_total": 0,
                 "items_igv": 0,
                 "upd_comercial": 0,
@@ -268,6 +270,7 @@ class ReportService:
         items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
         if not items_cols:
             return {
+                "sap_docentries": len(docentries_out),
                 "items_total": 0,
                 "items_igv": 0,
                 "upd_comercial": 0,
@@ -317,6 +320,7 @@ class ReportService:
             upd_hilos = self._sap_repository.ejecutar_actualizar_igv_hilos(docentries_out)
 
         return {
+            "sap_docentries": len(docentries_out),
             "items_total": len(items),
             "items_igv": len(items_igv),
             "upd_comercial": upd_comercial,
@@ -330,7 +334,7 @@ class ReportService:
     def consultar_prestamo(
         self,
         status_cb=None,
-    ) -> tuple[list[tuple[Any, ...]], list[str], list[str]]:
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Flujo Prestamo: LOGPROCESO -> DocEntry -> documentos -> items -> stock SAP.
         columnas = [
             "UID_ORDERS",
@@ -347,24 +351,24 @@ class ReportService:
             status_cb(f"Prestamo: buscando U_BOT_KEY desde {fecha_desde}...")
         docentries = self._sap_repository.obtener_docentries_prestamo(fecha_desde)
         if not docentries:
-            return [], columnas, []
+            return [], columnas
 
         if status_cb:
             status_cb(f"Prestamo: consultando {len(docentries)} DocEntry en MySQL...")
         doc_rows, doc_cols = self._mysql_repository.ejecutar_validar_igv_docs(docentries)
         if not doc_rows:
-            return [], columnas, docentries
+            return [], columnas
 
         idx_doc_id = _find_col_index(doc_cols, ["id_document"])
         document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
         if not document_ids:
-            return [], columnas, docentries
+            return [], columnas
 
         if status_cb:
             status_cb(f"Prestamo: consultando items ({len(document_ids)}) en MySQL...")
         items_rows, items_cols = self._mysql_repository.ejecutar_validar_igv_items(document_ids)
         if not items_rows:
-            return [], columnas, docentries
+            return [], columnas
 
         idx_uid = _find_col_index_optional(items_cols, ["uid_orders"])
         idx_material = _find_col_index(items_cols, ["material"])
@@ -393,7 +397,7 @@ class ReportService:
                 centros.add(centro)
 
         if not materiales or not centros:
-            return [], columnas, docentries
+            return [], columnas
 
         if status_cb:
             status_cb(
@@ -404,7 +408,7 @@ class ReportService:
             sorted(centros),
         )
         if not sap_rows:
-            return [], columnas, docentries
+            return [], columnas
 
         idx_itemwarehouse = _find_col_index(sap_cols, ["itemwarehouse"])
         idx_stock = _find_col_index(sap_cols, ["stock"])
@@ -424,7 +428,7 @@ class ReportService:
                 continue
             resultados.append((uid, material, centro, consignado, b2b, stock, cantidad_num, diff))
 
-        return resultados, columnas, docentries
+        return resultados, columnas
 
     def revisar_hilos(self) -> tuple[list[tuple[Any, ...]], list[str]]:
         # Consulta de hilos pendientes en SAP.
