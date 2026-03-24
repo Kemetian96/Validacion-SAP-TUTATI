@@ -1,4 +1,5 @@
-SELECT t1.uid_orders AS UID_ORDERS,
+SELECT t1.id_orders AS ID_ORDERS,
+    t1.uid_orders AS UID_ORDERS,
     CAST(IF(t4.id_commerces = 1,t4.eid, t3.eid_items_1)AS UNSIGNED)  AS Material,
     IF(IF((t3.consignment <> 0), 'X', '') = 'X',   CONCAT(t5.eid_stores, '1002'),   CONCAT(t5.eid_stores, '1001') ) AS Centro,
     CONCAT(
@@ -17,4 +18,4 @@ LEFT JOIN t_items_1_rels_holdings t4 ON t4.id_items_1 = t3.id_items_1
 LEFT JOIN t_stores t5 ON t5.id_stores = t1.id_stores_documented
 WHERE t1.id_orders IN ({{documents_in}})
   AND t3.eid_items_1 NOT LIKE '00000000007%'
-GROUP BY  Material, Centro;
+GROUP BY t1.id_orders, t1.uid_orders, Material, Centro, Consignado, B2B;

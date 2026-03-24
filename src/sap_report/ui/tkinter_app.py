@@ -396,7 +396,7 @@ def run_ui(
         # Muestra resultados de prestamo en tabla.
         window = tk.Toplevel(root)
         window.title("Prestamo")
-        _centrar_ventana(window, 860, 460)
+        _centrar_ventana(window, 980, 460)
         window.configure(bg=bg)
 
         table_frame = ttk.Frame(window)
@@ -408,6 +408,8 @@ def run_ui(
             key = col.lower()
             tree.heading(key, text=col)
             width = 120 if key in ("material", "centro") else 140
+            if key == "u_bot_docentry":
+                width = 150
             tree.column(key, width=width, anchor="center")
 
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)

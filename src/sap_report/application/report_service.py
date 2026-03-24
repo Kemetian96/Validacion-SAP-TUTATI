@@ -338,6 +338,7 @@ class ReportService:
         # Flujo Prestamo: LOGPROCESO -> DocEntry -> documentos -> items -> stock SAP.
         columnas = [
             "UID_ORDERS",
+            "U_BOT_DOCENTRY",
             "Material",
             "Centro",
             "Consignado",
@@ -360,6 +361,12 @@ class ReportService:
             return [], columnas
 
         idx_doc_id = _find_col_index(doc_cols, ["id_document"])
+        idx_docentry = _find_col_index(doc_cols, ["docentry"])
+        docentry_por_orden = {
+            str(r[idx_doc_id]): str(r[idx_docentry])
+            for r in doc_rows
+            if r[idx_doc_id] is not None and r[idx_docentry] is not None
+        }
         document_ids = [str(r[idx_doc_id]) for r in doc_rows if r[idx_doc_id] is not None]
         if not document_ids:
             return [], columnas
@@ -370,6 +377,7 @@ class ReportService:
         if not items_rows:
             return [], columnas
 
+        idx_id_order = _find_col_index_optional(items_cols, ["id_orders"])
         idx_uid = _find_col_index_optional(items_cols, ["uid_orders"])
         idx_material = _find_col_index(items_cols, ["material"])
         idx_centro = _find_col_index(items_cols, ["centro"])
@@ -378,19 +386,21 @@ class ReportService:
         idx_consignado = _find_col_index_optional(items_cols, ["consignado"])
         idx_b2b = _find_col_index_optional(items_cols, ["b2b"])
 
-        memoria: list[tuple[str, str, str, str, Any, Any, Any]] = []
+        memoria: list[tuple[str, str, str, str, str, Any, Any, Any]] = []
         materiales: set[str] = set()
         centros: set[str] = set()
 
         for row in items_rows:
+            id_order = str(row[idx_id_order]) if idx_id_order is not None and row[idx_id_order] is not None else ""
             uid = str(row[idx_uid]) if idx_uid is not None and row[idx_uid] is not None else ""
+            docentry = docentry_por_orden.get(id_order, "")
             material = str(row[idx_material]) if row[idx_material] is not None else ""
             centro = str(row[idx_centro]) if row[idx_centro] is not None else ""
             matcentro = str(row[idx_matcentro]) if row[idx_matcentro] is not None else material + centro
             cantidad = row[idx_cantidad]
             consignado = row[idx_consignado] if idx_consignado is not None else ""
             b2b = row[idx_b2b] if idx_b2b is not None else ""
-            memoria.append((uid, material, centro, matcentro, cantidad, consignado, b2b))
+            memoria.append((uid, docentry, material, centro, matcentro, cantidad, consignado, b2b))
             if material:
                 materiales.add(material)
             if centro:
@@ -420,13 +430,13 @@ class ReportService:
             sap_map[key] = _to_float(row[idx_stock])
 
         resultados: list[tuple[Any, ...]] = []
-        for uid, material, centro, matcentro, cantidad, consignado, b2b in memoria:
+        for uid, docentry, material, centro, matcentro, cantidad, consignado, b2b in memoria:
             stock = sap_map.get(matcentro, 0.0)
             cantidad_num = _to_float(cantidad)
             diff = cantidad_num - stock
             if diff <= 0:
                 continue
-            resultados.append((uid, material, centro, consignado, b2b, stock, cantidad_num, diff))
+            resultados.append((uid, docentry, material, centro, consignado, b2b, stock, cantidad_num, diff))
 
         return resultados, columnas
 
