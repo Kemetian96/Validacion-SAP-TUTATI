@@ -1,7 +1,7 @@
 import calendar
 import logging
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as datetime_time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -444,6 +444,55 @@ class ReportService:
         # Consulta de hilos pendientes en SAP.
         return self._sap_repository.ejecutar_revisar_hilos()
 
+    def validar_pagos(
+        self,
+        fecha: date,
+        account_name: str,
+        status_cb=None,
+    ) -> dict[str, Any]:
+        # Compara pagos SAP vs TUTATI para una fecha y medio de pago.
+        if not account_name.strip():
+            raise ValueError("Debe seleccionar un tipo de pago.")
+
+        if status_cb:
+            status_cb(f"Validar pagos SAP: {fecha} | {account_name}")
+        sap_rows, sap_cols = self._sap_repository.ejecutar_validar_pagos(
+            fecha,
+            fecha,
+            account_name,
+        )
+
+        cuid_inicio = fecha_a_cuid(datetime.combine(fecha, datetime_time.min))
+        cuid_fin = fecha_a_cuid(datetime.combine(fecha, datetime_time(23, 59, 59)))
+        if status_cb:
+            status_cb(f"Validar pagos TUTATI: {fecha} | {account_name}")
+        tutati_rows, tutati_cols = self._mysql_repository.ejecutar_validar_pagos(
+            cuid_inicio,
+            cuid_fin,
+            account_name,
+        )
+
+        comparacion_rows, resumen = _comparar_pagos(
+            sap_rows,
+            sap_cols,
+            tutati_rows,
+            tutati_cols,
+            threshold=0.01,
+        )
+
+        return {
+            "fecha": fecha.isoformat(),
+            "tipo_pago": account_name,
+            "sap_total": len(sap_rows),
+            "tutati_total": len(tutati_rows),
+            "faltan_en_sap": resumen["faltan_en_sap"],
+            "faltan_en_tutati": resumen["faltan_en_tutati"],
+            "montos_diferentes": resumen["montos_diferentes"],
+            "coinciden": resumen["coinciden"],
+            "rows": comparacion_rows,
+            "cols": ["Estado", "Orden", "Monto_SAP", "Monto_TUTATI", "Diferencia"],
+        }
+
     def _ejecutar_por_lotes(
         self,
         fecha_inicio_date: date,
@@ -846,6 +895,88 @@ def _calcular_diferencias_validacion_nc(
         )
         vistos.add(docentry)
     return diferencias
+
+
+def _comparar_pagos(
+    sap_rows: list[tuple[Any, ...]],
+    sap_cols: list[str],
+    tutati_rows: list[tuple[Any, ...]],
+    tutati_cols: list[str],
+    threshold: float,
+) -> tuple[list[tuple[str, str, float, float, float]], dict[str, int]]:
+    # Compara ordenes y montos entre SAP y TUTATI.
+    sap_map = _extraer_pagos_por_orden(
+        sap_rows,
+        sap_cols,
+        order_candidates=["u_pla_ordenweb"],
+        amount_candidates=["doctotal"],
+    )
+    tutati_map = _extraer_pagos_por_orden(
+        tutati_rows,
+        tutati_cols,
+        order_candidates=["uid_orders"],
+        amount_candidates=["amount"],
+    )
+
+    comparacion_rows: list[tuple[str, str, float, float, float]] = []
+    resumen = {
+        "faltan_en_sap": 0,
+        "faltan_en_tutati": 0,
+        "montos_diferentes": 0,
+        "coinciden": 0,
+    }
+
+    for orden in sorted(set(sap_map.keys()) | set(tutati_map.keys())):
+        monto_sap = sap_map.get(orden)
+        monto_tutati = tutati_map.get(orden)
+        if monto_sap is None:
+            resumen["faltan_en_sap"] += 1
+            comparacion_rows.append(
+                (
+                    "FALTA_EN_SAP",
+                    orden,
+                    0.0,
+                    round(monto_tutati or 0.0, 2),
+                    round(-(monto_tutati or 0.0), 2),
+                )
+            )
+            continue
+        if monto_tutati is None:
+            resumen["faltan_en_tutati"] += 1
+            comparacion_rows.append(
+                ("FALTA_EN_TUTATI", orden, round(monto_sap, 2), 0.0, round(monto_sap, 2))
+            )
+            continue
+
+        diferencia = round(monto_sap - monto_tutati, 2)
+        if abs(diferencia) > threshold:
+            resumen["montos_diferentes"] += 1
+            comparacion_rows.append(
+                ("MONTO_DIFERENTE", orden, round(monto_sap, 2), round(monto_tutati, 2), diferencia)
+            )
+        else:
+            resumen["coinciden"] += 1
+
+    return comparacion_rows, resumen
+
+
+def _extraer_pagos_por_orden(
+    rows: list[tuple[Any, ...]],
+    cols: list[str],
+    order_candidates: list[str],
+    amount_candidates: list[str],
+) -> dict[str, float]:
+    # Agrupa montos por orden para comparar ambos lados.
+    idx_order = _find_col_index(cols, order_candidates)
+    idx_amount = _find_col_index(cols, amount_candidates)
+
+    grouped: dict[str, float] = {}
+    for row in rows:
+        orden = _norm_id(row[idx_order])
+        if not orden:
+            continue
+        grouped[orden] = grouped.get(orden, 0.0) + _to_float(row[idx_amount])
+    return grouped
 
 
 def _find_col_index_optional(cols: list[str], candidates: list[str]) -> int | None:

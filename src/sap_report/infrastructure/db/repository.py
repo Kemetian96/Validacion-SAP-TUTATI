@@ -35,11 +35,13 @@ SAP_PRESTAMO_STOCK_PATH = Path(__file__).resolve().parent / "queries" / "prestam
 SAP_PRESTAMO_LOGPROCESO_PATH = Path(__file__).resolve().parent / "queries" / "prestamo_logproceso.sql"
 SAP_VALIDACION_NC_PATH = Path(__file__).resolve().parent / "queries" / "ValidacionNC.sql"
 SAP_VALIDACION_NC_ARTICULOS_PATH = Path(__file__).resolve().parent / "queries" / "ValidacionNCArticulos.sql"
+SAP_VALIDAR_PAGOS_PATH = Path(__file__).resolve().parent / "queries" / "Validar_pagos_sap.sql"
 PG_PATCH_ETL_PATH = Path(__file__).resolve().parent / "queries" / "migrar_OC.sql"
 MYSQL_VALIDAR_IGV_DOCS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_docs.sql"
 MYSQL_VALIDAR_IGV_ITEMS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_items.sql"
 MYSQL_VALIDAR_IGV_PEND_ORDERS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_pendientes_orders.sql"
 MYSQL_VALIDAR_IGV_PEND_RMAS_PATH = Path(__file__).resolve().parent / "queries" / "validar_igv_mysql_pendientes_rmas.sql"
+MYSQL_VALIDAR_PAGOS_PATH = Path(__file__).resolve().parent / "queries" / "Validar_pagos_tutati.sql"
 
 
 class SapHanaRepository:
@@ -64,6 +66,7 @@ class SapHanaRepository:
         self._query_validacion_nc_articulos = SAP_VALIDACION_NC_ARTICULOS_PATH.read_text(
             encoding="utf-8"
         )
+        self._query_validar_pagos = SAP_VALIDAR_PAGOS_PATH.read_text(encoding="utf-8")
 
     def ejecutar_consulta_sql(
         self,
@@ -186,6 +189,22 @@ class SapHanaRepository:
             return [], ["DocEntry", "U_BOT_CODARTICULO"]
         docentries_in = _render_in_list(docentries)
         sql = self._query_validacion_nc_articulos.replace("{{DOCENTRY_IN}}", docentries_in)
+        return self._ejecutar_sql(sql)
+
+    def ejecutar_validar_pagos(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+        account_name: str,
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta conciliacion de pagos en SAP por fecha y medio de pago.
+        account_name_safe = account_name.replace("'", "''")
+        sql = (
+            self._query_validar_pagos
+            .replace("{{fecha_inicio}}", fecha_inicio.strftime("%Y-%m-%d"))
+            .replace("{{fecha_fin}}", fecha_fin.strftime("%Y-%m-%d"))
+            .replace("{{account_name}}", account_name_safe)
+        )
         return self._ejecutar_sql(sql)
 
     def _ejecutar_sql(self, sql: str) -> tuple[list[tuple[Any, ...]], list[str]]:
@@ -494,6 +513,7 @@ class MySQLRepository:
         self._query_validar_igv_items = MYSQL_VALIDAR_IGV_ITEMS_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_pend_orders = MYSQL_VALIDAR_IGV_PEND_ORDERS_PATH.read_text(encoding="utf-8")
         self._query_validar_igv_pend_rmas = MYSQL_VALIDAR_IGV_PEND_RMAS_PATH.read_text(encoding="utf-8")
+        self._query_validar_pagos = MYSQL_VALIDAR_PAGOS_PATH.read_text(encoding="utf-8")
 
     def probar_conexion(self) -> None:
         # Conexion corta para validar acceso a MySQL.
@@ -633,6 +653,22 @@ class MySQLRepository:
                     conn.close()
 
         return total_ok
+
+    def ejecutar_validar_pagos(
+        self,
+        cuid_inicio: int,
+        cuid_fin: int,
+        account_name: str,
+    ) -> tuple[list[tuple[Any, ...]], list[str]]:
+        # Ejecuta conciliacion de pagos en MySQL por fecha y medio de pago.
+        account_name_safe = account_name.replace("'", "''")
+        sql = (
+            self._query_validar_pagos
+            .replace("{{cuid_inicio}}", str(cuid_inicio))
+            .replace("{{cuid_fin}}", str(cuid_fin))
+            .replace("{{account_name}}", account_name_safe)
+        )
+        return self.ejecutar_sql(sql)
 
 
 def _render_in_list(values: list[str]) -> str:

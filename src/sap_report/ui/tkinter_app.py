@@ -17,6 +17,27 @@ except ImportError:
     DateEntry = None
 
 
+PAYMENT_ACCOUNT_OPTIONS = [
+    "Caja Tda",
+    "Cuentas por pagar - saldo",
+    "Puntos y obsequios otorgados",
+    "IGV - Retiro de bienes",
+    "Tarjetas Visanet",
+    "Tarjetas Mercadopago",
+    "Tarjetas MCM",
+    "Tarjetas Expressnet",
+    "Pago Izipay",
+    "Tarjetas Diners",
+    "Tarjetas Estilos",
+    "Efectivo Activa",
+    "Deposito BCP",
+    "Deposito Scotiabank",
+    "Deposito Interbank",
+    "Deposito BBVA",
+    "Tarjetas Openpay",
+]
+
+
 def _parse_env_date(value: str) -> date:
     # Acepta fecha ISO o YYYY-MM-DD.
     value = value.strip()
@@ -70,7 +91,7 @@ def run_ui(
     # Configura ventana principal.
     root = tk.Tk()
     root.title("Reporte SAP")
-    root.geometry(f"{ui_width}x{ui_height}")
+    root.geometry(f"{ui_width}x{max(ui_height, 320)}")
     root.resizable(False, False)
 
     # Estilos visuales (tema claro con acento).
@@ -161,8 +182,11 @@ def run_ui(
     prestamo_btn = ttk.Button(actions, text="Prestamo", width=17, style="Secondary.TButton")
     prestamo_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
 
+    validar_pagos_btn = ttk.Button(actions, text="Validar Pagos", width=17, style="Secondary.TButton")
+    validar_pagos_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
     ejecutar_btn = ttk.Button(actions, text="Ejecutar reporte", width=17, style="Accent.TButton")
-    ejecutar_btn.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+    ejecutar_btn.grid(row=3, column=0, columnspan=2, pady=(10, 0))
 
     ttk.Label(main, textvariable=estado_var, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
 
@@ -190,6 +214,7 @@ def run_ui(
 
         running["value"] = True
         ejecutar_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Ejecutando consulta...")
 
         def worker() -> None:
@@ -222,6 +247,7 @@ def run_ui(
             finally:
                 running["value"] = False
                 root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -232,6 +258,7 @@ def run_ui(
         running["value"] = True
         ejecutar_btn.state(["disabled"])
         probar_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Probando conexiones...")
 
         def worker_test() -> None:
@@ -257,6 +284,7 @@ def run_ui(
                 running["value"] = False
                 root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
                 root.after(0, lambda: probar_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_test, daemon=True).start()
 
@@ -271,6 +299,7 @@ def run_ui(
         validar_igv_btn.state(["disabled"])
         revisar_hilos_btn.state(["disabled"])
         prestamo_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Validando articulos...")
 
         def worker_validar() -> None:
@@ -305,6 +334,7 @@ def run_ui(
                 root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
                 root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
                 root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_validar, daemon=True).start()
 
@@ -319,6 +349,7 @@ def run_ui(
         validar_igv_btn.state(["disabled"])
         revisar_hilos_btn.state(["disabled"])
         prestamo_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Validando IGV...")
 
         def worker_igv() -> None:
@@ -359,6 +390,7 @@ def run_ui(
                 root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
                 root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
                 root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_igv, daemon=True).start()
 
@@ -503,6 +535,208 @@ def run_ui(
             side="left", padx=(8, 0)
         )
 
+    def _mostrar_validacion_pagos(resultado: dict[str, Any]) -> None:
+        # Muestra resumen y diferencias de la validacion de pagos.
+        window = tk.Toplevel(root)
+        window.title("Validar Pagos")
+        _centrar_ventana(window, 920, 520)
+        window.configure(bg=bg)
+        fecha_resultado = _parse_env_date(resultado["fecha"])
+        tipo_pago_resultado = resultado["tipo_pago"]
+
+        def _cerrar_y_regresar() -> None:
+            if window.winfo_exists():
+                window.destroy()
+            root.after(
+                0,
+                lambda: _abrir_validar_pagos(
+                    fecha_default=fecha_resultado,
+                    tipo_pago_default=tipo_pago_resultado,
+                ),
+            )
+
+        window.protocol("WM_DELETE_WINDOW", _cerrar_y_regresar)
+
+        resumen_texto = (
+            f"Fecha: {resultado['fecha']} | Tipo: {resultado['tipo_pago']} | "
+            f"SAP: {resultado['sap_total']} | TUTATI: {resultado['tutati_total']} | "
+            f"Faltan en SAP: {resultado['faltan_en_sap']} | "
+            f"Faltan en TUTATI: {resultado['faltan_en_tutati']} | "
+            f"Montos diferentes: {resultado['montos_diferentes']} | "
+            f"Coinciden: {resultado['coinciden']}"
+        )
+
+        ttk.Label(
+            window,
+            text=resumen_texto,
+            style="Muted.TLabel",
+            wraplength=860,
+            justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        frame = ttk.Frame(window)
+        frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        cols = resultado["cols"]
+        rows = resultado["rows"]
+        columns = tuple(c.lower() for c in cols)
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=14)
+        for col in cols:
+            key = col.lower()
+            tree.heading(key, text=col)
+            width = 150
+            if key == "orden":
+                width = 240
+            tree.column(key, width=width, anchor="center")
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        if rows:
+            for row in rows:
+                tree.insert("", "end", values=row)
+        else:
+            tree.insert("", "end", values=("SIN_DIFERENCIAS", "", 0.0, 0.0, 0.0))
+
+        def _copiar_filas(filas: list[tuple[Any, ...]]) -> None:
+            if not filas:
+                return
+            header = "\t".join(cols)
+            body = "\n".join("\t".join(str(v) for v in fila) for fila in filas)
+            texto = header + "\n" + body
+            window.clipboard_clear()
+            window.clipboard_append(texto)
+            window.update()
+
+        def _copiar_seleccion() -> None:
+            seleccion = tree.selection()
+            filas = [tree.item(item_id, "values") for item_id in seleccion]
+            _copiar_filas(filas)
+
+        def _copiar_todo() -> None:
+            filas = [tree.item(item_id, "values") for item_id in tree.get_children("")]
+            _copiar_filas(filas)
+
+        botones = ttk.Frame(window)
+        botones.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(botones, text="Copiar seleccion", style="Secondary.TButton", command=_copiar_seleccion).pack(
+            side="left"
+        )
+        ttk.Button(botones, text="Copiar todo", style="Secondary.TButton", command=_copiar_todo).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Button(botones, text="Volver", style="Secondary.TButton", command=_cerrar_y_regresar).pack(
+            side="right"
+        )
+
+    def _abrir_validar_pagos(
+        fecha_default: date | None = None,
+        tipo_pago_default: str | None = None,
+    ) -> None:
+        # Abre ventana para elegir fecha y medio de pago.
+        if running["value"]:
+            return
+
+        window = tk.Toplevel(root)
+        window.title("Validar Pagos")
+        _centrar_ventana(window, 390, 220)
+        window.configure(bg=bg)
+        window.transient(root)
+        window.grab_set()
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", lambda: None if running["value"] else window.destroy())
+
+        frame = ttk.Frame(window, padding=12, style="Card.TFrame")
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ttk.Label(frame, text="Fecha").grid(row=0, column=0, sticky="w", pady=(0, 10))
+        fecha_pago_entry = DateEntry(
+            frame,
+            width=16,
+            date_pattern="yyyy-mm-dd",
+            year=(fecha_default or fecha_fin_default).year,
+            month=(fecha_default or fecha_fin_default).month,
+            day=(fecha_default or fecha_fin_default).day,
+        )
+        fecha_pago_entry.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=(0, 10))
+
+        ttk.Label(frame, text="Tipo de pago").grid(row=1, column=0, sticky="w")
+        tipo_pago_var = tk.StringVar(value=tipo_pago_default or "Tarjetas Visanet")
+        tipo_pago_combo = ttk.Combobox(
+            frame,
+            textvariable=tipo_pago_var,
+            values=PAYMENT_ACCOUNT_OPTIONS,
+            state="readonly",
+            width=28,
+        )
+        tipo_pago_combo.grid(row=1, column=1, sticky="w", padx=(8, 0))
+
+        ejecutar_pago_btn = ttk.Button(frame, text="Validar pagos", style="Accent.TButton")
+        ejecutar_pago_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+
+        def _toggle_dialog(enabled: bool) -> None:
+            if not window.winfo_exists():
+                return
+            fecha_pago_entry.configure(state="normal" if enabled else "disabled")
+            tipo_pago_combo.configure(state="readonly" if enabled else "disabled")
+            if enabled:
+                ejecutar_pago_btn.state(["!disabled"])
+            else:
+                ejecutar_pago_btn.state(["disabled"])
+
+        def _ejecutar_validar_pagos() -> None:
+            if running["value"]:
+                return
+
+            fecha_pago = fecha_pago_entry.get_date()
+            tipo_pago = tipo_pago_var.get().strip()
+            if not tipo_pago:
+                messagebox.showerror("Error", "Debe seleccionar un tipo de pago.", parent=window)
+                return
+
+            running["value"] = True
+            ejecutar_btn.state(["disabled"])
+            probar_btn.state(["disabled"])
+            validar_btn.state(["disabled"])
+            validar_igv_btn.state(["disabled"])
+            revisar_hilos_btn.state(["disabled"])
+            prestamo_btn.state(["disabled"])
+            validar_pagos_btn.state(["disabled"])
+            _toggle_dialog(False)
+            set_estado(f"Validando pagos: {fecha_pago} | {tipo_pago}")
+
+            def worker_validar_pagos() -> None:
+                try:
+                    resultado = service.validar_pagos(
+                        fecha=fecha_pago,
+                        account_name=tipo_pago,
+                        status_cb=set_estado,
+                    )
+                    root.after(0, lambda: _mostrar_validacion_pagos(resultado))
+                    root.after(0, window.destroy)
+                    set_estado("Validar pagos completado.")
+                except Exception as exc:
+                    root.after(0, lambda: messagebox.showerror("Error", str(exc), parent=window))
+                    set_estado(f"Error: {exc}")
+                finally:
+                    running["value"] = False
+                    root.after(0, lambda: ejecutar_btn.state(["!disabled"]))
+                    root.after(0, lambda: probar_btn.state(["!disabled"]))
+                    root.after(0, lambda: validar_btn.state(["!disabled"]))
+                    root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
+                    root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
+                    root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+                    root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
+                    root.after(0, lambda: _toggle_dialog(True))
+
+            threading.Thread(target=worker_validar_pagos, daemon=True).start()
+
+        ejecutar_pago_btn.configure(command=_ejecutar_validar_pagos)
+
     def on_revisar_hilos() -> None:
         # Ejecuta revision de hilos sin bloquear la UI.
         if running["value"]:
@@ -514,6 +748,7 @@ def run_ui(
         validar_igv_btn.state(["disabled"])
         revisar_hilos_btn.state(["disabled"])
         prestamo_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Revisando hilos...")
 
         def worker_hilos() -> None:
@@ -532,6 +767,7 @@ def run_ui(
                 root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
                 root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
                 root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_hilos, daemon=True).start()
 
@@ -546,6 +782,7 @@ def run_ui(
         validar_igv_btn.state(["disabled"])
         revisar_hilos_btn.state(["disabled"])
         prestamo_btn.state(["disabled"])
+        validar_pagos_btn.state(["disabled"])
         set_estado("Prestamo: buscando casos con inventario negativo...")
 
         def worker_prestamo() -> None:
@@ -573,6 +810,7 @@ def run_ui(
                 root.after(0, lambda: validar_igv_btn.state(["!disabled"]))
                 root.after(0, lambda: revisar_hilos_btn.state(["!disabled"]))
                 root.after(0, lambda: prestamo_btn.state(["!disabled"]))
+                root.after(0, lambda: validar_pagos_btn.state(["!disabled"]))
 
         threading.Thread(target=worker_prestamo, daemon=True).start()
 
@@ -582,6 +820,7 @@ def run_ui(
     validar_igv_btn.configure(command=on_validar_igv)
     revisar_hilos_btn.configure(command=on_revisar_hilos)
     prestamo_btn.configure(command=on_prestamo)
+    validar_pagos_btn.configure(command=_abrir_validar_pagos)
     # Inicia el loop de eventos de Tkinter.
     root.mainloop()
 
